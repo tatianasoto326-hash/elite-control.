@@ -37,6 +37,30 @@ const number = (n) => new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 
 const dateLabel = (d) => d ? new Date(`${d}T12:00:00`).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 const safe = (v) => String(v ?? '').trim();
 
+// Client-side credential vault: AES-GCM with a passphrase-derived key.
+// The passphrase is never stored; only salt, IV and ciphertext are saved.
+const toB64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+const fromB64 = (value) => Uint8Array.from(atob(value), c => c.charCodeAt(0));
+async function credentialKey(passphrase, salt) {
+  const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'}, material, {name:'AES-GCM',length:256}, false, ['encrypt','decrypt']);
+}
+async function encryptPlatformPassword(password, passphrase) {
+  if (!globalThis.crypto?.subtle) throw new Error('Web Crypto no disponible');
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await credentialKey(passphrase, salt);
+  const encrypted = await crypto.subtle.encrypt({name:'AES-GCM',iv}, key, new TextEncoder().encode(password));
+  return JSON.stringify({v:1,alg:'AES-GCM',kdf:'PBKDF2-SHA256',iterations:310000,salt:toB64(salt),iv:toB64(iv),data:toB64(encrypted)});
+}
+async function decryptPlatformPassword(payload, passphrase) {
+  const item = typeof payload === 'string' ? JSON.parse(payload) : payload;
+  if (item?.v !== 1 || item?.alg !== 'AES-GCM' || item?.kdf !== 'PBKDF2-SHA256') throw new Error('Formato de credencial no reconocido');
+  const key = await credentialKey(passphrase, fromB64(item.salt));
+  const plain = await crypto.subtle.decrypt({name:'AES-GCM',iv:fromB64(item.iv)}, key, fromB64(item.data));
+  return new TextDecoder().decode(plain);
+}
+
 function AuthGate({ children }) {
   const [session, setSession] = useState(null);
   const [checking, setChecking] = useState(true);
@@ -147,7 +171,7 @@ function Workspace({ session }) {
     const specs = [
       ['modelos', 'id,nombre,nickname,codigo,jornada_preferida,estado,notas,telefono,created_at', 'created_at'],
       ['aplicaciones', 'id,nombre,activa', 'created_at'],
-      ['modelo_aplicaciones', 'id,modelo_id,aplicacion_id,activa,usuario', 'created_at'],
+      ['modelo_aplicaciones', 'id,modelo_id,aplicacion_id,activa,usuario,credencial_cifrada', 'created_at'],
       ['metas', 'id,modelo_aplicacion_id,tokens_meta,fecha_inicio,fecha_fin,tipo_periodo', 'created_at'],
       ['turnos', 'id,modelo_id,monitor_turno_id,sala,es_apoyo,fecha,jornada,jornadas_cubiertas,tipo_turno,pendientes,hora_inicio,hora_fin,estado,observaciones', 'created_at'],
       ['monitor_turnos', 'id,monitor_id,fecha,jornada,jornadas_cubiertas,tipo_turno,hora_inicio,hora_fin,pendientes,observaciones,estado,created_at,closed_at', 'created_at'],
@@ -364,14 +388,52 @@ function ModelsPage({ models, apps, assignments, refresh, notify }) {
 }
 
 function AppsPage({models,apps,assignments,goals,refresh,notify}) {
-  const [appModal,setAppModal]=useState(false); const [assignModal,setAssignModal]=useState(false); const [name,setName]=useState(''); const [form,setForm]=useState({modelo_id:'',aplicacion_id:'',usuario:'',tokens_meta:'',tipo_periodo:'quincenal',fecha_inicio:today()}); const [saving,setSaving]=useState(false);
+  const [appModal,setAppModal]=useState(false); const [assignModal,setAssignModal]=useState(false); const [name,setName]=useState('');
+  const [form,setForm]=useState({modelo_id:'',aplicacion_id:'',usuario:'',password:'',masterPassword:'',tokens_meta:'',tipo_periodo:'quincenal',fecha_inicio:today()});
+  const [saving,setSaving]=useState(false); const [revealed,setRevealed]=useState({}); const [revealing,setRevealing]=useState('');
   const addApp=async e=>{e.preventDefault();setSaving(true);const {error}=await supabase.from('aplicaciones').insert({nombre:safe(name),activa:true});setSaving(false);if(error){notify(`No se pudo guardar: ${error.message}`);return;}setName('');setAppModal(false);notify('Aplicación agregada');refresh();};
-  const assign=async e=>{e.preventDefault();if(form.password&&(!form.masterPassword||form.masterPassword.length<10)){notify('Crea una clave maestra de al menos 10 caracteres para cifrar la contraseña.');return;}setSaving(true);let credencial_cifrada=null;try{if(form.password)credencial_cifrada=await encryptPlatformPassword(form.password,form.masterPassword);}catch(err){setSaving(false);notify('No fue posible cifrar la contraseña en este dispositivo.');return;}const {data:link,error}=await supabase.from('modelo_aplicaciones').insert({modelo_id:form.modelo_id,aplicacion_id:form.aplicacion_id,usuario:safe(form.usuario)||null,credencial_cifrada,activa:true}).select('id').single();if(error){setSaving(false);notify(`No se pudo asignar: ${error.message}`);return;}const {error:goalError}=await supabase.from('metas').insert({modelo_aplicacion_id:link.id,tokens_meta:Number(form.tokens_meta),tipo_periodo:form.tipo_periodo,fecha_inicio:form.fecha_inicio,fecha_fin:null});setSaving(false);if(goalError){notify(`Aplicación asignada, pero no se guardó la meta: ${goalError.message}`);}else notify('Aplicación y meta asignadas');setAssignModal(false);refresh();};
+  const assign=async e=>{
+    e.preventDefault();
+    if(!form.modelo_id||!form.aplicacion_id){notify('Selecciona una modelo y una aplicación.');return;}
+    if(form.password&&(!form.masterPassword||form.masterPassword.length<12)){notify('La clave maestra debe tener al menos 12 caracteres.');return;}
+    setSaving(true); let credencial_cifrada=null;
+    try{if(form.password)credencial_cifrada=await encryptPlatformPassword(form.password,form.masterPassword);}
+    catch(err){setSaving(false);notify('No fue posible cifrar la contraseña en este dispositivo.');return;}
+    const {data:link,error}=await supabase.from('modelo_aplicaciones').insert({modelo_id:form.modelo_id,aplicacion_id:form.aplicacion_id,usuario:safe(form.usuario)||null,credencial_cifrada,activa:true}).select('id').single();
+    if(error){setSaving(false);notify(`No se pudo asignar: ${error.message}`);return;}
+    const {error:goalError}=await supabase.from('metas').insert({modelo_aplicacion_id:link.id,tokens_meta:Number(form.tokens_meta),tipo_periodo:form.tipo_periodo,fecha_inicio:form.fecha_inicio,fecha_fin:null});
+    setSaving(false);if(goalError){notify(`Aplicación asignada, pero no se guardó la meta: ${goalError.message}`);}else notify('Aplicación, credencial cifrada y meta asignadas');
+    setForm({modelo_id:'',aplicacion_id:'',usuario:'',password:'',masterPassword:'',tokens_meta:'',tipo_periodo:'quincenal',fecha_inicio:today()});setAssignModal(false);refresh();
+  };
+  const reveal=async a=>{
+    if(!a.credencial_cifrada){notify('Esta asignación no tiene contraseña guardada.');return;}
+    const pass=window.prompt('Ingresa la clave maestra del almacén de credenciales. No la compartas por este chat.');
+    if(!pass)return; setRevealing(a.id);
+    try{const value=await decryptPlatformPassword(a.credencial_cifrada,pass);setRevealed(prev=>({...prev,[a.id]:value}));}
+    catch(e){notify('No se pudo descifrar. Verifica la clave maestra.');}
+    finally{setRevealing('');}
+  };
   const setActive=async (app)=>{const {error}=await supabase.from('aplicaciones').update({activa:!app.activa}).eq('id',app.id);if(error)notify(error.message);else{notify(app.activa?'Aplicación desactivada':'Aplicación activada');refresh();}};
   const currentGoal=(assignment)=>goals.filter(g=>g.modelo_aplicacion_id===assignment.id && g.fecha_inicio<=today() && (!g.fecha_fin||g.fecha_fin>=today())).sort((a,b)=>b.fecha_inicio.localeCompare(a.fecha_inicio))[0];
-  return <><PageHeading kicker="CONFIGURACIÓN DE PRODUCCIÓN" title="Aplicaciones y metas" subtitle="Cada modelo puede tener plataformas distintas y una meta diaria propia en cada una." action={<div className="heading-actions"><button className="secondary-btn" onClick={()=>setAppModal(true)}><Plus size={15}/> Nueva aplicación</button><button className="primary-btn" onClick={()=>setAssignModal(true)} disabled={!models.length||!apps.length}><Plus size={15}/> Asignar meta</button></div>}/><div className="app-config-grid"><section className="panel"><div className="panel-heading"><div><h3>Aplicaciones disponibles</h3><p>Catálogo general de plataformas</p></div><span className="soft-pill">{apps.length} aplicaciones</span></div>{apps.length?<div className="platform-list">{apps.map(a=><div className="platform-row" key={a.id}><div className="platform-symbol"><MonitorPlay size={18}/></div><div className="platform-name"><b>{a.nombre}</b><span>{assignments.filter(x=>x.aplicacion_id===a.id&&x.activa).length} asignaciones</span></div><span className={`status-pill ${a.activa?'activa':'inactiva'}`}>{a.activa?'Activa':'Inactiva'}</span><button className="text-btn" onClick={()=>setActive(a)}>{a.activa?'Desactivar':'Activar'}</button></div>)}</div>:<EmptyInline icon={MonitorPlay} title="Sin aplicaciones registradas" text="Crea las plataformas que utiliza tu equipo." action={<button className="secondary-btn" onClick={()=>setAppModal(true)}><Plus size={15}/> Agregar aplicación</button>}/>}</section><section className="panel"><div className="panel-heading"><div><h3>Metas por modelo</h3><p>Objetivo diario vigente por plataforma</p></div><BadgeCheck size={19} className="subtle-icon"/></div>{assignments.length?<div className="goal-list">{assignments.map(a=>{const m=models.find(x=>x.id===a.modelo_id);const p=apps.find(x=>x.id===a.aplicacion_id);const g=currentGoal(a);return <div className="goal-row" key={a.id}><div><b>{m?.nombre||'Modelo'}</b><span>{p?.nombre||'Aplicación'} · {a.usuario?`@${a.usuario}`:'Sin usuario'} · {a.activa?'Asignada':'Inactiva'}</span></div><strong>{g?`${number(g.tokens_meta)} <small>tokens/${g.tipo_periodo==='quincenal'?'quincena':'día'}</small>`:'Sin meta'}</strong></div>;})}</div>:<EmptyInline icon={Gauge} title="Todavía no hay metas" text="Asigna una aplicación a una modelo y define su objetivo diario."/>}</section></div>{appModal&&<Modal title="Nueva aplicación" subtitle="Registra una plataforma en el catálogo." onClose={()=>setAppModal(false)}><form onSubmit={addApp} className="form-grid"><Field label="Nombre de la aplicación *" full><input required value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre de la plataforma"/></Field><div className="field-full"><FormActions onCancel={()=>setAppModal(false)} saving={saving} label="Guardar aplicación"/></div></form></Modal>}{assignModal&&<Modal title="Asignar aplicación y meta" subtitle="La meta será independiente para esta modelo y esta plataforma." onClose={()=>setAssignModal(false)}><form onSubmit={assign} className="form-grid"><Field label="Modelos a tu cargo *" full><div className="shift-checks model-shift-checks">{models.filter(m=>m.estado==='activa').map(m=><label key={m.id}><input type="checkbox" checked={(form.modelo_ids||[]).includes(m.id)} onChange={e=>setForm({...form,modelo_ids:e.target.checked?[...form.modelo_ids,m.id]:(form.modelo_ids||[]).filter(id=>id!==m.id)})}/>{m.nombre}{m.nickname?` (@${m.nickname})`:''}</label>)}</div><small className="progress-caption">Selecciona todas las modelos que estarán contigo durante esta jornada.</small></Field><Field label="Aplicación *" full><select required value={form.aplicacion_id} onChange={e=>setForm({...form,aplicacion_id:e.target.value})}><option value="">Selecciona una aplicación</option>{apps.filter(a=>a.activa).map(a=><option key={a.id} value={a.id}>{a.nombre}</option>)}</select></Field><Field label="Usuario / nickname en esta aplicación" full><input value={form.usuario} onChange={e=>setForm({...form,usuario:e.target.value})} placeholder="Usuario de la modelo en la plataforma"/></Field><Field label="Meta de tokens *" full><input required type="number" min="1" step="1" value={form.tokens_meta} onChange={e=>setForm({...form,tokens_meta:e.target.value})} placeholder="Ej. 1200"/></Field><Field label="Periodo de la meta"><select value={form.tipo_periodo} onChange={e=>setForm({...form,tipo_periodo:e.target.value})}><option value="quincenal">Quincenal</option><option value="diaria">Diaria</option></select></Field><Field label="Vigente desde *" full><input required type="date" value={form.fecha_inicio} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></Field><div className="field-full"><FormActions onCancel={()=>setAssignModal(false)} saving={saving} label="Guardar asignación"/></div></form></Modal>}</>;
+  return <><PageHeading kicker="CONFIGURACIÓN DE PRODUCCIÓN" title="Aplicaciones y metas" subtitle="Cada modelo tiene sus plataformas, usuario, contraseña cifrada y meta independiente." action={<div className="heading-actions"><button className="secondary-btn" onClick={()=>setAppModal(true)}><Plus size={15}/> Nueva aplicación</button><button className="primary-btn" onClick={()=>setAssignModal(true)} disabled={!models.length||!apps.length}><Plus size={15}/> Asignar plataforma</button></div>}/>
+    <div className="app-config-grid">
+      <section className="panel"><div className="panel-heading"><div><h3>Aplicaciones disponibles</h3><p>Catálogo general de plataformas</p></div><span className="soft-pill">{apps.length} aplicaciones</span></div>{apps.length?<div className="platform-list">{apps.map(a=><div className="platform-row" key={a.id}><div className="platform-symbol"><MonitorPlay size={18}/></div><div className="platform-name"><b>{a.nombre}</b><span>{assignments.filter(x=>x.aplicacion_id===a.id&&x.activa).length} asignaciones</span></div><span className={`status-pill ${a.activa?'activa':'inactiva'}`}>{a.activa?'Activa':'Inactiva'}</span><button className="text-btn" onClick={()=>setActive(a)}>{a.activa?'Desactivar':'Activar'}</button></div>)}</div>:<EmptyInline icon={MonitorPlay} title="Sin aplicaciones registradas" text="Crea las plataformas que utiliza tu equipo." action={<button className="secondary-btn" onClick={()=>setAppModal(true)}><Plus size={15}/> Agregar aplicación</button>}/>}</section>
+      <section className="panel"><div className="panel-heading"><div><h3>Plataformas por modelo</h3><p>Usuario y contraseña protegida</p></div><ShieldCheck size={19} className="subtle-icon"/></div>{assignments.length?<div className="goal-list">{assignments.map(a=>{const m=models.find(x=>x.id===a.modelo_id);const p=apps.find(x=>x.id===a.aplicacion_id);const g=currentGoal(a);return <div className="goal-row" key={a.id}><div><b>{m?.nombre||'Modelo'} · {p?.nombre||'Aplicación'}</b><span>{a.usuario? `Usuario: @${a.usuario}`:'Sin usuario'} · {a.credencial_cifrada?'Contraseña cifrada':'Sin contraseña guardada'} · {g?number(g.tokens_meta)+' tokens':'Sin meta'}</span>{revealed[a.id]&&<span className="credential-reveal">Clave: {revealed[a.id]}</span>}</div>{a.credencial_cifrada&&<button className="text-btn" disabled={revealing===a.id} onClick={()=>revealed[a.id]?setRevealed(prev=>({...prev,[a.id]:''})):reveal(a)}>{revealing===a.id?'Abriendo…':revealed[a.id]?'Ocultar':'Ver clave'}</button>}</div>;})}</div>:<EmptyInline icon={Gauge} title="Todavía no hay plataformas asignadas" text="Asigna una plataforma a cada modelo y registra sus credenciales."/>}</section>
+    </div>
+    {appModal&&<Modal title="Nueva aplicación" subtitle="Registra una plataforma en el catálogo." onClose={()=>setAppModal(false)}><form onSubmit={addApp} className="form-grid"><Field label="Nombre de la aplicación *" full><input required value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre de la plataforma"/></Field><div className="field-full"><FormActions onCancel={()=>setAppModal(false)} saving={saving} label="Guardar aplicación"/></div></form></Modal>}
+    {assignModal&&<Modal title="Asignar plataforma y meta" subtitle="La contraseña se cifra antes de guardarse. Usa una clave maestra compartida y consérvala fuera de la aplicación." onClose={()=>setAssignModal(false)}><form onSubmit={assign} className="form-grid">
+      <Field label="Modelo *" full><select required value={form.modelo_id} onChange={e=>setForm({...form,modelo_id:e.target.value})}><option value="">Selecciona una modelo</option>{models.filter(m=>m.estado==='activa').map(m=><option key={m.id} value={m.id}>{m.nombre}{m.nickname?' (@'+m.nickname+')':''}</option>)}</select></Field>
+      <Field label="Aplicación *" full><select required value={form.aplicacion_id} onChange={e=>setForm({...form,aplicacion_id:e.target.value})}><option value="">Selecciona una aplicación</option>{apps.filter(a=>a.activa).map(a=><option key={a.id} value={a.id}>{a.nombre}</option>)}</select></Field>
+      <Field label="Usuario / nickname"><input value={form.usuario} onChange={e=>setForm({...form,usuario:e.target.value})} placeholder="Usuario de la modelo"/></Field>
+      <Field label="Contraseña de la plataforma"><input type="password" autoComplete="new-password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} placeholder="No la envíes por WhatsApp"/></Field>
+      <Field label="Clave maestra del almacén *" full><input type="password" autoComplete="new-password" value={form.masterPassword} onChange={e=>setForm({...form,masterPassword:e.target.value})} placeholder="Mínimo 12 caracteres"/></Field>
+      <Field label="Meta de tokens *"><input required type="number" min="1" step="1" value={form.tokens_meta} onChange={e=>setForm({...form,tokens_meta:e.target.value})} placeholder="Ej. 1200"/></Field>
+      <Field label="Periodo de la meta"><select value={form.tipo_periodo} onChange={e=>setForm({...form,tipo_periodo:e.target.value})}><option value="quincenal">Quincenal</option><option value="diaria">Diaria</option></select></Field>
+      <Field label="Vigente desde *" full><input required type="date" value={form.fecha_inicio} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></Field>
+      <div className="field-full"><FormActions onCancel={()=>setAssignModal(false)} saving={saving} label="Guardar plataforma y meta"/></div>
+    </form></Modal>}
+  </>;
 }
-
 
 function ShiftsPage({models,apps,assignments,goals,shifts,monitorShifts,production,reports,refresh,notify}) {
   const [selected,setSelected]=useState('');
