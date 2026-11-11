@@ -15,12 +15,12 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const NAV = [
-  { id: 'dashboard', label: 'Resumen', icon: LayoutDashboard, group: 'Principal' },
-  { id: 'models', label: 'Modelos', icon: Users, group: 'Gestión' },
-  { id: 'apps', label: 'Aplicaciones y metas', icon: MonitorPlay, group: 'Gestión' },
+  { id: 'dashboard', label: 'Mi sede hoy', icon: LayoutDashboard, group: 'Principal' },
+  { id: 'models', label: 'Equipo y modelos', icon: Users, group: 'Gestión' },
+  { id: 'apps', label: 'Plataformas y metas', icon: MonitorPlay, group: 'Gestión' },
   { id: 'shifts', label: 'Turnos y producción', icon: CalendarDays, group: 'Operación' },
   { id: 'replacements', label: 'Reposiciones', icon: CalendarClock, group: 'Operación' },
-  { id: 'debts', label: 'Deudas y abonos', icon: Wallet, group: 'Finanzas' },
+  { id: 'debts', label: 'Finanzas', icon: Wallet, group: 'Finanzas' },
   { id: 'reports', label: 'Reportes', icon: FileBarChart2, group: 'Finanzas' },
 ];
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
@@ -282,18 +282,55 @@ function MyShiftPanel({models,apps,assignments,shifts,monitorShifts,session,refr
 
 function Dashboard({ models, apps, shifts, monitorShifts, session, todayTokens, pendingRepos, openDebt, production, assignments, goals, replacements, refresh, notify, setActive }) {
   const activeModels = models.filter(m => m.estado === 'activa').length;
-  const todaysProduction = production.filter(p => shifts.some(s => s.id === p.turno_id));
-  const topModels = models.map(m => ({ ...m, tokens: todaysProduction.filter(p => shifts.find(s => s.id === p.turno_id)?.modelo_id === m.id).reduce((x,p) => x + Number(p.tokens || 0), 0) })).sort((a,b) => b.tokens-a.tokens).slice(0,5);
-  const upcoming = shifts.slice().sort((a,b) => `${a.fecha}${a.hora_inicio || ''}`.localeCompare(`${b.fecha}${b.hora_inicio || ''}`)).slice(0,5);
+  const teamRows = shifts.map(s => {
+    const model = models.find(m => m.id === s.modelo_id);
+    const tokens = production.filter(p => p.turno_id === s.id).reduce((sum, p) => sum + Number(p.tokens || 0), 0);
+    const platforms = assignments.filter(a => a.modelo_id === s.modelo_id && a.activa).map(a => apps.find(x => x.id === a.aplicacion_id)?.nombre).filter(Boolean);
+    return { ...s, model, tokens, platforms };
+  }).sort((a,b) => String(a.sala || '99').localeCompare(String(b.sala || '99'), 'es', {numeric:true}));
+  const occupied = new Set(teamRows.map(s => String(s.sala || '').trim()).filter(Boolean));
+  const roomConflicts = [...occupied].filter(room => teamRows.filter(s => String(s.sala || '').trim() === room).length > 1);
+  const rooms = Array.from({length:11}, (_,i) => {
+    const number = String(i+1);
+    const assigned = teamRows.filter(s => String(s.sala || '').trim().toLowerCase().replace('room ','') === number);
+    return { number, shift: assigned[0] || null, conflict: assigned.length > 1 };
+  });
+  const statusLabel = state => state === 'cumplido' ? 'Turno finalizado' : state === 'ausencia' ? 'Ausente' : state === 'cancelado' ? 'Cancelado' : state === 'en_curso' ? 'En transmisión' : 'Programado';
   return <>
+    <PageHeading kicker="CONTROL DE SEDE · VENECIA" title="Mi sede hoy" subtitle="Vista general de las 11 salas, el equipo, los turnos y la producción del día." action={<button className="primary-btn" onClick={() => setActive('shifts')}><Plus size={15}/> Organizar turnos</button>}/>
+    <div className="stats-grid ec2-stats">
+      <StatCard label="Modelos activas" value={`${activeModels} / 11`} foot="Integrantes registradas" icon={Users}/>
+      <StatCard label="En jornada hoy" value={shifts.filter(s => !['cumplido','ausencia','cancelado'].includes(s.estado)).length} foot="Modelos con turno" icon={Activity} accent="stat-lilac"/>
+      <StatCard label="Producción de hoy" value={number(todayTokens)} foot="Tokens registrados" icon={TrendingUp} accent="stat-pink"/>
+      <StatCard label="Reposiciones" value={pendingRepos} foot="Pendientes por coordinar" icon={Clock3}/>
+      <StatCard label="Saldo por cobrar" value={money(openDebt)} foot="Cartera registrada" icon={Wallet} accent="stat-warm"/>
+    </div>
+    <section className="panel ec2-room-panel">
+      <div className="panel-heading"><div><h3>Estado de las 11 salas</h3><p>Ocupación y situación de cada espacio durante la jornada de hoy.</p></div><span className="soft-pill">{occupied.size} salas ocupadas</span></div>
+      <div className="ec2-room-grid">{rooms.map(({number,shift,conflict}) => <article className={`ec2-room-card ${shift?'occupied':''} ${conflict?'conflict':''}`} key={number}>
+        <div className="ec2-room-top"><span className="ec2-room-number">SALA {number}</span><span className={`ec2-room-dot ${shift?'on':''}`}/></div>
+        {shift ? <><b className="ec2-room-model">{shift.model?.nombre || 'Modelo'}</b><span className="ec2-room-shift">{shift.jornada || 'Turno'} · {shift.hora_inicio || '—'}–{shift.hora_fin || '—'}</span><span className={`ec2-room-status ${conflict?'warning':shift.estado==='ausencia'?'warning':shift.estado==='cumplido'?'done':'live'}`}>{conflict?'Revisar sala duplicada':statusLabel(shift.estado)}</span></> : <><b className="ec2-room-model vacant">Disponible</b><span className="ec2-room-shift">Sin asignación registrada</span><span className="ec2-room-status vacant-status">Sala libre</span></>}
+      </article>)}</div>
+      {roomConflicts.length>0&&<div className="notice notice-error ec2-conflict-note"><AlertCircle size={16}/> Hay más de una modelo asignada a la misma sala: {roomConflicts.join(', ')}. Revisa los turnos.</div>}
+    </section>
+    <section className="panel ec2-team-panel">
+      <div className="panel-heading"><div><h3>Equipo de hoy</h3><p>Modelos asignadas, salas, aplicaciones y monitoreo.</p></div><button className="text-btn" onClick={()=>setActive('models')}>Ver equipo <ArrowUpRight size={14}/></button></div>
+      {teamRows.length ? <div className="ec2-team-list">{teamRows.map(s=><div className="ec2-team-row" key={s.id}>
+        <div className="person-avatar">{(s.model?.nombre||'M').slice(0,1).toUpperCase()}</div>
+        <div className="ec2-team-person"><b>{s.model?.nombre||'Modelo'}</b><small>{s.es_apoyo?'Apoyo / doblaje':'Equipo asignado'} · {s.platforms.join(' · ')||'Sin plataformas'}</small></div>
+        <span className="ec2-team-room">{s.sala?('Sala '+s.sala):'Sin sala'}</span>
+        <span className={`status-pill ${s.estado}`}>{statusLabel(s.estado)}</span>
+        <b className="ec2-team-tokens">{number(s.tokens)} <small>tokens</small></b>
+      </div>)}</div> : <EmptyInline icon={Users} title="Todavía no hay modelos asignadas a turnos" text="Cuando registres las jornadas del equipo, aquí aparecerán sus salas, aplicaciones y producción." action={<button className="primary-btn small-btn" onClick={()=>setActive('shifts')}><Plus size={14}/> Registrar turnos</button>}/>}
+    </section>
+    <section className="panel ec2-production-panel">
+      <div className="panel-heading"><div><h3>Producción por modelo</h3><p>Tokens acumulados en los turnos registrados hoy.</p></div><button className="text-btn" onClick={()=>setActive('shifts')}>Abrir producción <ArrowUpRight size={14}/></button></div>
+      {teamRows.length ? <div className="ec2-production-list">{teamRows.map(s=><div className="ec2-production-row" key={s.id}><span>{s.model?.nombre||'Modelo'}</span><div className="rank-track"><i style={{width:`${teamRows.reduce((m,x)=>Math.max(m,x.tokens),0)?Math.max(0,s.tokens/teamRows.reduce((m,x)=>Math.max(m,x.tokens),0)*100):0}%`}}/></div><b>{number(s.tokens)}</b></div>)}</div> : <EmptyInline icon={TrendingUp} title="Sin producción registrada" text="La producción aparecerá aquí al guardar tokens por aplicación."/>}
+    </section>
     <MyShiftPanel models={models} apps={apps} assignments={assignments} shifts={shifts} monitorShifts={monitorShifts} session={session} refresh={refresh} notify={notify} setActive={setActive}/>
-    <div className="hero-strip"><div className="hero-orbit orbit-one"/><div className="hero-orbit orbit-two"/><div className="hero-copy"><div className="hero-tag"><Sparkles size={13}/> CONTROL Y SEGUIMIENTO</div><h2>Una operación clara.<br/><em>Un equipo enfocado.</em></h2><p>Organiza turnos, producción y compromisos desde un solo panel.</p></div><div className="hero-emblem"><Crown size={32}/><span>ELITE</span><small>CONTROL</small></div></div>
-    <div className="stats-grid"><StatCard label="Modelos activas" value={`${activeModels} / 11`} foot="Cupos de tu equipo" icon={Users}/><StatCard label="Producción de hoy" value={number(todayTokens)} foot="Tokens registrados" icon={Activity} accent="stat-lilac"/><StatCard label="Turnos de hoy" value={shifts.length} foot="Programados o registrados" icon={CalendarDays}/><StatCard label="Reposiciones pendientes" value={pendingRepos} foot="Por coordinar" icon={Clock3} accent="stat-pink"/><StatCard label="Saldo pendiente de deudas" value={money(openDebt)} foot="Cartera por recuperar" icon={Wallet} accent="stat-warm"/></div>
-    <div className="dashboard-grid"><section className="panel"><div className="panel-heading"><div><h3>Producción por modelo</h3><p>Tokens registrados en los turnos de hoy</p></div><button className="text-btn" onClick={() => setActive('shifts')}>Ver turnos <ArrowUpRight size={14}/></button></div>{topModels.length ? <div className="ranking-list">{topModels.map((m,i) => <div className="ranking-row" key={m.id}><span className={`rank-number rank-${i+1}`}>{String(i+1).padStart(2,'0')}</span><div className="rank-info"><b>{m.nombre}</b><div className="rank-track"><i style={{width:`${topModels[0].tokens ? Math.max(2,m.tokens/topModels[0].tokens*100) : 0}%`}}/></div></div><strong>{number(m.tokens)}</strong></div>)}</div> : <EmptyInline icon={TrendingUp} title="Aún no hay producción registrada" text="Cuando registres tokens por aplicación y turno, aparecerán aquí."/>}</section>
-      <section className="panel"><div className="panel-heading"><div><h3>Actividad de hoy</h3><p>Turnos de la fecha actual</p></div><span className="soft-pill">{shifts.length} turnos</span></div>{upcoming.length ? <div className="activity-list">{upcoming.map(s => <div className="activity-row" key={s.id}><div className="activity-icon"><CalendarClock size={17}/></div><div><b>{models.find(m => m.id===s.modelo_id)?.nombre || 'Modelo'}</b><span>{s.jornada} · {s.hora_inicio || 'Hora pendiente'}</span></div><span className={`status-pill ${s.estado}`}>{s.estado}</span></div>)}</div> : <EmptyInline icon={CalendarDays} title="Sin turnos para hoy" text="Programa los turnos del equipo para llevar el control diario." action={<button className="text-btn" onClick={() => setActive('shifts')}>Crear turno <ArrowUpRight size={14}/></button>}/>}</section></div>
-    <section className="panel quick-panel"><div className="panel-heading"><div><h3>Accesos rápidos</h3><p>Las tareas que más usarás en el día a día</p></div></div><div className="quick-grid"><QuickAction icon={Users} title="Agregar modelo" text="Crear una ficha del equipo" onClick={() => setActive('models')}/><QuickAction icon={MonitorPlay} title="Configurar metas" text="Asignar aplicaciones y objetivos" onClick={() => setActive('apps')}/><QuickAction icon={Wallet} title="Registrar deuda" text="Crear cuotas y controlar abonos" onClick={() => setActive('debts')}/><QuickAction icon={FileText} title="Crear reporte" text="Preparar resumen para WhatsApp" onClick={() => setActive('reports')}/></div></section>
   </>;
 }
+
 function QuickAction({icon:Icon,title,text,onClick}) { return <button className="quick-action" onClick={onClick}><span className="quick-icon"><Icon size={19}/></span><span><b>{title}</b><small>{text}</small></span><ArrowUpRight size={16} className="quick-arrow"/></button>; }
 function EmptyInline({icon:Icon,title,text,action}) { return <div className="empty-inline"><span><Icon size={21}/></span><b>{title}</b><p>{text}</p>{action}</div>; }
 function Modal({ title, subtitle, onClose, children }) { return <div className="modal-backdrop" onMouseDown={e => { if(e.target===e.currentTarget) onClose(); }}><div className="modal"><div className="modal-head"><div><h3>{title}</h3>{subtitle && <p>{subtitle}</p>}</div><button className="icon-btn" onClick={onClose}><X size={18}/></button></div>{children}</div></div>; }
