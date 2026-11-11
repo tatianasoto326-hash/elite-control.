@@ -204,6 +204,7 @@ function StatCard({ label, value, foot, icon: Icon, accent }) {
   return <div className={`stat-card ${accent || ''}`}><div className="stat-head"><span>{label}</span><span className="stat-icon"><Icon size={18}/></span></div><strong>{value}</strong><small>{foot}</small></div>;
 }
 function Dashboard({ models, apps, shifts, todayTokens, pendingRepos, openDebt, production, assignments, goals, replacements, setActive }) {
+  const activeModels = models.filter(m => m.estado === 'activa').length;
   const todaysProduction = production.filter(p => shifts.some(s => s.id === p.turno_id));
   const topModels = models.map(m => ({ ...m, tokens: todaysProduction.filter(p => shifts.find(s => s.id === p.turno_id)?.modelo_id === m.id).reduce((x,p) => x + Number(p.tokens || 0), 0) })).sort((a,b) => b.tokens-a.tokens).slice(0,5);
   const upcoming = shifts.slice().sort((a,b) => `${a.fecha}${a.hora_inicio || ''}`.localeCompare(`${b.fecha}${b.hora_inicio || ''}`)).slice(0,5);
