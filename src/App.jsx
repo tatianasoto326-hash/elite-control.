@@ -41,9 +41,10 @@ const safe = (v) => String(v ?? '').trim();
 // The passphrase is never stored; only salt, IV and ciphertext are saved.
 const toB64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const fromB64 = (value) => Uint8Array.from(atob(value), c => c.charCodeAt(0));
-async function credentialKey(passphrase, salt) {
+async function credentialKey(passphrase, salt, iterations = 310000) {
+  if (typeof passphrase !== 'string' || passphrase.length < 12) throw new Error('La clave maestra debe tener al menos 12 caracteres');
   const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:310000,hash:'SHA-256'}, material, {name:'AES-GCM',length:256}, false, ['encrypt','decrypt']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations,hash:'SHA-256'}, material, {name:'AES-GCM',length:256}, false, ['encrypt','decrypt']);
 }
 async function encryptPlatformPassword(password, passphrase) {
   if (!globalThis.crypto?.subtle) throw new Error('Web Crypto no disponible');
@@ -56,8 +57,11 @@ async function encryptPlatformPassword(password, passphrase) {
 async function decryptPlatformPassword(payload, passphrase) {
   const item = typeof payload === 'string' ? JSON.parse(payload) : payload;
   if (item?.v !== 1 || item?.alg !== 'AES-GCM' || item?.kdf !== 'PBKDF2-SHA256') throw new Error('Formato de credencial no reconocido');
-  const key = await credentialKey(passphrase, fromB64(item.salt));
-  const plain = await crypto.subtle.decrypt({name:'AES-GCM',iv:fromB64(item.iv)}, key, fromB64(item.data));
+  if (!Number.isInteger(item.iterations) || item.iterations < 200000 || item.iterations > 1000000) throw new Error('Parámetros de cifrado no válidos');
+  const salt = fromB64(item.salt); const iv = fromB64(item.iv); const data = fromB64(item.data);
+  if (salt.length !== 16 || iv.length !== 12 || data.length < 17) throw new Error('Credencial cifrada incompleta');
+  const key = await credentialKey(passphrase, salt, item.iterations);
+  const plain = await crypto.subtle.decrypt({name:'AES-GCM',iv}, key, data);
   return new TextDecoder().decode(plain);
 }
 
