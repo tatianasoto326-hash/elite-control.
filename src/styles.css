@@ -71,3 +71,57 @@ body{background:#fbf6fa}
   .shift-card-row{align-items:flex-start}
   .shift-card-actions{flex-direction:column;align-items:flex-end;padding:11px 0}
 }
+
+
+/* ELITE CONTROL 2.0 — primera etapa visual, sin cambios de esquema ni datos */
+.ec2-stats{grid-template-columns:repeat(5,minmax(0,1fr))}
+.ec2-room-panel,.ec2-team-panel,.ec2-production-panel{margin-bottom:16px}
+.ec2-room-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.ec2-room-card{min-width:0;border:1px solid #eee8f0;border-radius:12px;padding:13px;background:#fcfafc;display:flex;flex-direction:column;gap:7px;min-height:124px}
+.ec2-room-card.occupied{background:#fff;border-color:#e7d7e3}
+.ec2-room-card.conflict{border-color:#d9a36b;background:#fffaf3}
+.ec2-room-top{display:flex;align-items:center;justify-content:space-between}
+.ec2-room-number{font-size:8px;font-weight:800;letter-spacing:.12em;color:#9a8a9d}
+.ec2-room-dot{width:8px;height:8px;border-radius:50%;background:#d8d0da}
+.ec2-room-dot.on{background:#70b495;box-shadow:0 0 0 4px #eaf5ef}
+.ec2-room-model{font-size:12px;color:#403247;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ec2-room-model.vacant{color:#a99eaa;font-weight:500}
+.ec2-room-shift{font-size:9px;color:#9b909e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ec2-room-status{font-size:8px;font-weight:700;align-self:flex-start;border-radius:20px;padding:4px 7px}
+.ec2-room-status.live{background:#edf6f1;color:#5b9278}
+.ec2-room-status.done{background:#f1eef5;color:#82728e}
+.ec2-room-status.warning{background:#fff0dc;color:#a36d32}
+.ec2-room-status.vacant-status{background:#f1eef2;color:#9c929e}
+.ec2-conflict-note{margin-top:12px}
+.ec2-team-list,.ec2-production-list{display:flex;flex-direction:column;gap:0}
+.ec2-team-row{display:flex;align-items:center;gap:12px;padding:11px 2px;border-bottom:1px solid #f1ecf2;min-width:0}
+.ec2-team-row:last-child{border-bottom:0}
+.ec2-team-person{flex:1;min-width:0}
+.ec2-team-person b{display:block;color:#493b50;font-size:10px}
+.ec2-team-person small{display:block;color:#a49aa8;font-size:8px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ec2-team-room{font-size:9px;color:#827487;white-space:nowrap}
+.ec2-team-tokens{font-size:10px;color:#594263;white-space:nowrap}
+.ec2-team-tokens small{font-size:8px;color:#a69ba9;font-weight:500}
+.ec2-production-row{display:grid;grid-template-columns:minmax(100px,1fr) minmax(70px,2fr) auto;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid #f1ecf2;font-size:10px;color:#57485d}
+.ec2-production-row:last-child{border-bottom:0}
+.ec2-production-row>b{font-size:10px;color:#5d4568}
+@media(max-width:1100px){.ec2-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.ec2-room-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:700px){
+ .page-wrap{padding:22px 14px 18px}
+ .topbar{height:64px;padding:0 14px}
+ .page-heading{align-items:flex-start;flex-direction:column;margin-bottom:17px}
+ .page-heading h1{font-size:27px}
+ .page-heading p{font-size:11px}
+ .ec2-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .ec2-stats .stat-card{padding:12px}
+ .ec2-stats .stat-card strong{font-size:18px}
+ .ec2-room-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .panel{padding:14px}
+ .ec2-team-row{gap:8px;flex-wrap:wrap}
+ .ec2-team-person{min-width:calc(100% - 54px)}
+ .ec2-team-room{margin-left:42px}
+ .ec2-team-row .status-pill{margin-left:auto}
+ .ec2-team-tokens{margin-left:auto}
+ .ec2-production-row{grid-template-columns:minmax(75px,1fr) minmax(45px,1.4fr) auto;gap:8px}
+ .page-footer{gap:8px;flex-wrap:wrap}
+}
