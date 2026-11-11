@@ -12,7 +12,7 @@ import {
 const ADMIN_EMAIL = 'tatianasoto326@gmail.com';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storage: window.sessionStorage } }) : null;
 
 const NAV = [
   { id: 'dashboard', label: 'Mi sede hoy', icon: LayoutDashboard, group: 'Principal' },
@@ -72,6 +72,12 @@ function AuthGate({ children }) {
 
   const verifyAdmin = useCallback(async (nextSession) => {
     if (!nextSession?.user?.id) { setIsAdmin(false); setSession(null); return; }
+    if (nextSession.user.email?.toLowerCase() !== ADMIN_EMAIL) {
+      await supabase.auth.signOut();
+      setSession(null); setIsAdmin(false);
+      setNotice('Esta cuenta no está autorizada para ELITE CONTROL.');
+      return;
+    }
     setCheckingAdmin(true);
     let { data, error } = await supabase.from('admins').select('user_id').eq('user_id', nextSession.user.id).maybeSingle();
     // Bootstrap the first administrator only for the designated email.
@@ -121,7 +127,7 @@ function AuthGate({ children }) {
     setSending(true); setNotice('');
     const { error } = await supabase.auth.signInWithOtp({
       email: cleanEmail,
-      options: { emailRedirectTo: window.location.origin, shouldCreateUser: true },
+      options: { emailRedirectTo: window.location.origin, shouldCreateUser: false },
     });
     setSending(false);
     setNotice(error ? `No se pudo enviar el acceso: ${error.message}` : 'Enlace enviado. Revisa tu correo y también la carpeta de spam. El enlace abrirá esta misma aplicación.');
@@ -135,7 +141,7 @@ function AuthGate({ children }) {
     <h1>ELITE <em>CONTROL</em></h1><p className="auth-copy">Tu operación, organizada en un solo lugar.</p>
     <form onSubmit={sendLink} className="auth-form"><label>Correo de administradora</label><div className="input-with-icon"><Smartphone size={17}/><input type="email" value={email} readOnly required aria-label="Correo autorizado de administradora"/></div><button className="primary-btn full" disabled={sending}>{sending ? 'Enviando enlace…' : 'Enviar enlace de acceso'} <ArrowUpRight size={17}/></button></form>
     {notice && <div className={`notice ${notice.startsWith('No se') || notice.startsWith('Este') ? 'notice-error' : 'notice-success'}`}>{notice}</div>}
-    <div className="auth-foot"><ShieldCheck size={15}/> Acceso exclusivo para la administradora. Las modelos no ingresan.</div>
+    <div className="auth-foot"><ShieldCheck size={15}/> Cuenta compartida autorizada para monitores. Las modelos no ingresan.</div>
   </div><div className="auth-glow"/></div>;
 }
 
@@ -208,7 +214,7 @@ function Workspace({ session }) {
       <div className="side-brand"><div className="brand-mark small"><Crown size={20}/></div><div><strong>ELITE <em>CONTROL</em></strong><span>ADMINISTRACIÓN</span></div><button className="mobile-close icon-btn" onClick={() => setMobileNav(false)}><X/></button></div>
       <div className="workspace-chip"><div className="workspace-dot"/><div><b>Elite · Venecia</b><span>Espacio de trabajo privado</span></div><ChevronDown size={15}/></div>
       {['Principal','Gestión','Operación','Finanzas'].map(group => <div className="nav-group" key={group}><p>{group}</p>{NAV.filter(n => n.group === group).map(item => { const Icon = item.icon; return <button key={item.id} className={`nav-item ${active === item.id ? 'active' : ''}`} onClick={() => { setActive(item.id); setMobileNav(false); }}><Icon size={17}/><span>{item.label}</span>{item.id === 'replacements' && pendingRepos > 0 && <i className="nav-count">{pendingRepos}</i>}</button>; })}</div>)}
-      <div className="sidebar-bottom"><div className="secure-note"><ShieldCheck size={17}/><div><b>Datos protegidos</b><span>Solo administradora</span></div></div><div className="profile-row"><div className="avatar">EC</div><div className="profile-text"><b>Administradora</b><span>{session.user.email}</span></div><button className="icon-btn" title="Cerrar sesión" onClick={async () => { await supabase.auth.signOut(); }}><LogOut size={17}/></button></div></div>
+      <div className="sidebar-bottom"><div className="secure-note"><ShieldCheck size={17}/><div><b>Acceso protegido</b><span>Cuenta compartida de monitores</span></div></div><div className="profile-row"><div className="avatar">EC</div><div className="profile-text"><b>Administradora</b><span>{session.user.email}</span></div><button className="icon-btn" title="Cerrar sesión" onClick={async () => { await supabase.auth.signOut(); }}><LogOut size={17}/></button></div></div>
     </aside>
     {mobileNav && <button className="mobile-overlay" onClick={() => setMobileNav(false)} aria-label="Cerrar menú"/>}
     <main className="main-area">
