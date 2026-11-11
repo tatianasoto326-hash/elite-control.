@@ -145,8 +145,8 @@ function Workspace({ session }) {
       ['monitor_turnos', 'id,monitor_id,fecha,jornada,jornadas_cubiertas,tipo_turno,hora_inicio,hora_fin,pendientes,observaciones,estado,created_at,closed_at', 'created_at'],
       ['produccion', 'id,turno_id,modelo_aplicacion_id,tokens,observaciones,registrado_at', 'registrado_at'],
       ['reposiciones', 'id,modelo_id,turno_origen_id,turno_reposicion_id,fecha_limite,horas,motivo,estado,created_at', 'created_at'],
-      ['deudas', 'id,modelo_id,concepto,categoria,valor_total,numero_cuotas,valor_cuota_sugerido,fecha_deuda,estado,notas', 'created_at'],
-      ['cuotas', 'id,deuda_id,numero_cuota,valor_programado,fecha_vencimiento,estado', 'created_at'],
+      ['deudas', 'id,modelo_id,concepto,categoria,valor_total,numero_cuotas,valor_cuota_sugerido,fecha_deuda,estado,notas', 'fecha_deuda'],
+      ['cuotas', 'id,deuda_id,numero_cuota,valor_programado,fecha_vencimiento,estado', 'numero_cuota'],
       ['abonos', 'id,deuda_id,cuota_id,valor,fecha_abono,tipo,referencia,notas', 'created_at'],
       ['reportes', 'id,modelo_id,turno_id,fecha_reporte,contenido,estado,enviado_at,created_at', 'created_at'],
     ];
@@ -219,7 +219,7 @@ function MyShiftPanel({models,apps,assignments,shifts,monitorShifts,session,refr
     const payload={monitor_id:session.user.id,fecha:form.fecha,jornada:form.tipo_turno==='reposicion'?'reposición':form.jornadas_cubiertas.length>1?'doblando':form.jornadas_cubiertas[0],jornadas_cubiertas:form.jornadas_cubiertas,tipo_turno:form.tipo_turno,hora_inicio:form.hora_inicio||null,hora_fin:form.hora_fin||null,pendientes:safe(form.pendientes)||null,observaciones:safe(form.observaciones)||null,estado:'abierto'};
     const {data:created,error:createError}=await supabase.from('monitor_turnos').insert(payload).select('id').single();
     if(createError){setSaving(false);notify('No se pudo registrar tu turno: '+createError.message);return;}
-    const makeRows=(ids,es_apoyo)=>ids.map(modelo_id=>({modelo_id,monitor_turno_id:created.id,es_apoyo,sala:safe(form.salas[modelo_id])||null,fecha:form.fecha,jornada:payload.jornada,tipo_turno:form.tipo_turno,jornadas_cubiertas:form.jornadas_cubiertas,hora_inicio:form.hora_inicio||null,hora_fin:safe(form.horas_fin[modelo_id])||form.hora_fin||null,pendientes:safe(form.pendientes)||null,observaciones:safe(form.observaciones)||null,estado:'en_curso'}));
+    const makeRows=(ids,es_apoyo)=>ids.map(modelo_id=>({modelo_id,monitor_turno_id:created.id,es_apoyo,sala:safe(form.salas[modelo_id])||null,fecha:form.fecha,jornada:payload.jornada,tipo_turno:form.tipo_turno,jornadas_cubiertas:form.jornadas_cubiertas,hora_inicio:form.hora_inicio||null,hora_fin:safe(form.horas_fin[modelo_id])||form.hora_fin||null,pendientes:safe(form.pendientes)||null,observaciones:safe(form.observaciones)||null,estado:'programado'}));
     const rows=[...makeRows(form.modelo_ids,false),...makeRows(form.apoyo_ids,true)];
     if(rows.length){
       const {error:rowsError}=await supabase.from('turnos').insert(rows);
