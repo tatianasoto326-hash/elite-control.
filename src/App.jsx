@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
   Activity, ArrowDownRight, ArrowUpRight, BadgeCheck, Banknote, Bell, CalendarDays,
