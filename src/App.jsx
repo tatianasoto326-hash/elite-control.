@@ -41,7 +41,16 @@ function AuthGate({ children }) {
   const verifyAdmin = useCallback(async (nextSession) => {
     if (!nextSession?.user?.id) { setIsAdmin(false); setSession(null); return; }
     setCheckingAdmin(true);
-    const { data, error } = await supabase.from('admins').select('user_id').eq('user_id', nextSession.user.id).maybeSingle();
+    let { data, error } = await supabase.from('admins').select('user_id').eq('user_id', nextSession.user.id).maybeSingle();
+    // Bootstrap the first administrator only for the designated email.
+    if (!error && !data && nextSession.user.email?.toLowerCase() === ADMIN_EMAIL) {
+      const { error: insertError } = await supabase.from('admins').insert({ user_id: nextSession.user.id });
+      if (!insertError || insertError.code === '23505') {
+        const result = await supabase.from('admins').select('user_id').eq('user_id', nextSession.user.id).maybeSingle();
+        data = result.data;
+        error = result.error;
+      }
+    }
     if (error || !data) {
       await supabase.auth.signOut();
       setSession(null);
