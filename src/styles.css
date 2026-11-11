@@ -23,3 +23,51 @@ body{background:#fbf6fa}
 .shift-checks label{display:flex;align-items:center;gap:7px;padding:9px 12px;border:1px solid #f1d5e2;border-radius:10px;background:#fff7fb;color:#7d4964;font-size:10px;text-transform:capitalize}
 .shift-checks input{width:auto;accent-color:#c94f88}
 @media(max-width:680px){.shift-checks label{flex:1;justify-content:center}}
+
+
+/* Mi turno de monitor y jornadas independientes */
+.my-shift-panel{margin-bottom:17px}
+.my-shift-sessions{display:grid;gap:13px}
+.my-shift-session{border:1px solid #f0dce7;border-radius:13px;padding:15px;background:linear-gradient(145deg,#fffafd,#fff)}
+.my-shift-session-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.my-shift-session-head h4{font:600 17px 'Playfair Display',serif;color:#4b2940;margin:5px 0}
+.my-shift-session-head p{display:flex;align-items:center;gap:5px;color:#9a8795;font-size:9px;margin:0}
+.my-shift-counts{display:flex;flex-wrap:wrap;gap:8px;margin:13px 0}
+.my-shift-counts span{background:#fff0f6;border:1px solid #f4d6e4;border-radius:20px;padding:6px 10px;color:#896078;font-size:9px}
+.my-shift-counts b{color:#a52d66;font-size:11px}
+.roster-group{margin-top:12px}
+.roster-group h5{margin:0 0 7px;color:#9d3b6d;font-size:9px;text-transform:uppercase;letter-spacing:.1em}
+.roster-model{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,1.3fr) auto auto;align-items:center;gap:10px;padding:10px 0;border-top:1px solid #f3edf1}
+.roster-model-name b,.roster-model-apps b{display:block;color:#514153;font-size:10px}
+.roster-model-name small,.roster-model-apps span{display:block;color:#a196a2;font-size:8px;margin-top:4px}
+.roster-model-apps b{font-size:9px;font-weight:500;line-height:1.5}
+.roster-model .text-btn{white-space:nowrap;font-size:8px}
+.my-shift-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:13px;padding-top:12px;border-top:1px solid #f1eaf0}
+.empty-roster{font-size:9px;color:#a096a3}
+.roster-room-fields{border:1px solid #f0dce7;border-radius:10px;padding:11px;background:#fff9fc}
+.roster-room-fields>b{display:block;color:#6d4b63;font-size:10px;margin-bottom:4px}
+.roster-room-fields>small{display:block;color:#a196a2;font-size:8px;line-height:1.5;margin-bottom:8px}
+.roster-room-edit{display:grid;grid-template-columns:minmax(90px,1fr) minmax(80px,1fr) minmax(90px,.8fr);align-items:center;gap:7px;padding:7px 0;border-top:1px solid #f3e9ef}
+.roster-room-edit>b{font-size:9px;color:#625067}
+.roster-room-edit input{font-size:9px;padding:8px}
+.shift-card-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 10px 0 0}
+.shift-card-select{display:flex;align-items:center;gap:11px;flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:9px 0 9px 9px;cursor:pointer}
+.shift-card-select .shift-info{min-width:0}
+.shift-card-select .shift-info small{white-space:normal}
+.shift-card-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.report-ready-dot{color:#9d5780}
+.individual-close-box{margin-top:15px;border:1px solid #f0dce7;border-radius:11px;padding:13px;background:#fff8fc}
+.individual-close-box>b{display:flex;align-items:center;gap:6px;color:#774761;font-size:10px}
+.individual-close-box p{font-size:9px;line-height:1.55;color:#9b8d9d;margin:7px 0 10px}
+@media(max-width:680px){
+  .my-shift-session{padding:12px}
+  .roster-model{grid-template-columns:1fr auto;gap:6px}
+  .roster-model-apps{grid-column:1/-1}
+  .roster-model .text-btn{grid-column:1/-1;justify-self:start}
+  .roster-room-edit{grid-template-columns:1fr 1fr}
+  .roster-room-edit>b{grid-column:1/-1}
+  .my-shift-actions{align-items:stretch;flex-direction:column}
+  .my-shift-actions button{width:100%}
+  .shift-card-row{align-items:flex-start}
+  .shift-card-actions{flex-direction:column;align-items:flex-end;padding:11px 0}
+}
