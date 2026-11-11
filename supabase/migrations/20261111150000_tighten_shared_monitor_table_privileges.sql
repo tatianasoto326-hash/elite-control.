@@ -1,0 +1,2 @@
+REVOKE ALL PRIVILEGES ON TABLE public.abonos, public.admins, public.aplicaciones, public.cuotas, public.deudas, public.metas, public.modelo_aplicaciones, public.modelos, public.monitor_turnos, public.produccion, public.reportes, public.reposiciones, public.turnos FROM anon;
+REVOKE TRUNCATE, REFERENCES, TRIGGER ON TABLE public.abonos, public.admins, public.aplicaciones, public.cuotas, public.deudas, public.metas, public.modelo_aplicaciones, public.modelos, public.monitor_turnos, public.produccion, public.reportes, public.reposiciones, public.turnos FROM authenticated;
