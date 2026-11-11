@@ -24,6 +24,14 @@ const NAV = [
   { id: 'reports', label: 'Reportes', icon: FileBarChart2, group: 'Finanzas' },
 ];
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+const fortnightRange = (date = today()) => {
+  const [year, month, day] = date.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  const startDay = day <= 15 ? 1 : 16;
+  const endDay = day <= 15 ? 15 : lastDay;
+  const pad = n => String(n).padStart(2, '0');
+  return { start: `${year}-${pad(month)}-${pad(startDay)}`, end: `${year}-${pad(month)}-${pad(endDay)}`, label: day <= 15 ? '1 al 15' : `16 al ${lastDay}` };
+};
 const money = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(Number(n || 0));
 const number = (n) => new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Number(n || 0));
 const dateLabel = (d) => d ? new Date(`${d}T12:00:00`).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -282,6 +290,14 @@ function MyShiftPanel({models,apps,assignments,shifts,monitorShifts,session,refr
 
 function Dashboard({ models, apps, shifts, monitorShifts, session, todayTokens, pendingRepos, openDebt, production, assignments, goals, replacements, refresh, notify, setActive }) {
   const activeModels = models.filter(m => m.estado === 'activa').length;
+  const period = fortnightRange();
+  const periodShiftIds = new Set(shifts.filter(s => s.fecha >= period.start && s.fecha <= period.end).map(s => s.id));
+  const fortnightTokens = production.filter(p => periodShiftIds.has(p.turno_id)).reduce((sum, p) => sum + Number(p.tokens || 0), 0);
+  const fortnightGoal = assignments.filter(a => a.activa).reduce((sum, a) => {
+    const goal = goals.filter(g => g.modelo_aplicacion_id === a.id && g.tipo_periodo === 'quincenal' && g.fecha_inicio <= period.end && (!g.fecha_fin || g.fecha_fin >= period.start)).sort((x,y) => y.fecha_inicio.localeCompare(x.fecha_inicio))[0];
+    return sum + Number(goal?.tokens_meta || 0);
+  }, 0);
+  const groupPct = fortnightGoal ? Math.round(fortnightTokens / fortnightGoal * 100) : 0;
   const teamRows = shifts.map(s => {
     const model = models.find(m => m.id === s.modelo_id);
     const tokens = production.filter(p => p.turno_id === s.id).reduce((sum, p) => sum + Number(p.tokens || 0), 0);
@@ -301,7 +317,9 @@ function Dashboard({ models, apps, shifts, monitorShifts, session, todayTokens, 
     <div className="stats-grid ec2-stats">
       <StatCard label="Modelos activas" value={`${activeModels} / 11`} foot="Integrantes registradas" icon={Users}/>
       <StatCard label="En jornada hoy" value={shifts.filter(s => !['cumplido','ausencia','cancelado'].includes(s.estado)).length} foot="Modelos con turno" icon={Activity} accent="stat-lilac"/>
-      <StatCard label="Producción de hoy" value={number(todayTokens)} foot="Tokens registrados" icon={TrendingUp} accent="stat-pink"/>
+      <StatCard label="Tokens de hoy" value={number(todayTokens)} foot="Todas las modelos · diario" icon={TrendingUp} accent="stat-pink"/>
+      <StatCard label="Tokens quincena" value={number(fortnightTokens)} foot={`Periodo ${period.label}`} icon={Activity} accent="stat-lilac"/>
+      <StatCard label="Meta general" value={fortnightGoal ? `${groupPct}%` : 'Por definir'} foot={fortnightGoal ? `${number(Math.max(0,fortnightGoal-fortnightTokens))} tokens faltantes` : 'Configura metas quincenales'} icon={Gauge}/>
       <StatCard label="Reposiciones" value={pendingRepos} foot="Pendientes por coordinar" icon={Clock3}/>
       <StatCard label="Saldo por cobrar" value={money(openDebt)} foot="Cartera registrada" icon={Wallet} accent="stat-warm"/>
     </div>
