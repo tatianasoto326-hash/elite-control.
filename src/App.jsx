@@ -125,6 +125,7 @@ function Workspace({ session }) {
   const [assignments, setAssignments] = useState([]);
   const [goals, setGoals] = useState([]);
   const [shifts, setShifts] = useState([]);
+  const [monitorShifts, setMonitorShifts] = useState([]);
   const [production, setProduction] = useState([]);
   const [replacements, setReplacements] = useState([]);
   const [debts, setDebts] = useState([]);
@@ -140,7 +141,8 @@ function Workspace({ session }) {
       ['aplicaciones', 'id,nombre,activa', 'created_at'],
       ['modelo_aplicaciones', 'id,modelo_id,aplicacion_id,activa,usuario', 'created_at'],
       ['metas', 'id,modelo_aplicacion_id,tokens_meta,fecha_inicio,fecha_fin,tipo_periodo', 'created_at'],
-      ['turnos', 'id,modelo_id,fecha,jornada,jornadas_cubiertas,tipo_turno,pendientes,hora_inicio,hora_fin,estado,observaciones', 'created_at'],
+      ['turnos', 'id,modelo_id,monitor_turno_id,sala,es_apoyo,fecha,jornada,jornadas_cubiertas,tipo_turno,pendientes,hora_inicio,hora_fin,estado,observaciones', 'created_at'],
+      ['monitor_turnos', 'id,monitor_id,fecha,jornada,jornadas_cubiertas,tipo_turno,hora_inicio,hora_fin,pendientes,observaciones,estado,created_at,closed_at', 'created_at'],
       ['produccion', 'id,turno_id,modelo_aplicacion_id,tokens,observaciones,registrado_at', 'registrado_at'],
       ['reposiciones', 'id,modelo_id,turno_origen_id,turno_reposicion_id,fecha_limite,horas,motivo,estado,created_at', 'created_at'],
       ['deudas', 'id,modelo_id,concepto,categoria,valor_total,numero_cuotas,valor_cuota_sugerido,fecha_deuda,estado,notas', 'created_at'],
@@ -153,7 +155,7 @@ function Workspace({ session }) {
       const failed = results.find(r => r.error);
       if (failed) throw new Error(`${failed.table}: ${failed.error.message}`);
       const data = Object.fromEntries(results.map(r => [r.table, r.data || []]));
-      setModels(data.modelos); setApps(data.aplicaciones); setAssignments(data.modelo_aplicaciones); setGoals(data.metas); setShifts(data.turnos); setProduction(data.produccion); setReplacements(data.reposiciones); setDebts(data.deudas); setInstallments(data.cuotas); setPayments(data.abonos); setReports(data.reportes);
+      setModels(data.modelos); setApps(data.aplicaciones); setAssignments(data.modelo_aplicaciones); setGoals(data.metas); setShifts(data.turnos); setMonitorShifts(data.monitor_turnos); setProduction(data.produccion); setReplacements(data.reposiciones); setDebts(data.deudas); setInstallments(data.cuotas); setPayments(data.abonos); setReports(data.reportes);
     } catch (e) { setError(e.message || 'No se pudieron cargar los datos.'); }
     setLoading(false);
   }, []);
@@ -182,10 +184,10 @@ function Workspace({ session }) {
       <div className="page-wrap">
         {error && <div className="notice notice-error page-notice"><AlertCircle size={17}/>{error}<button className="icon-btn" onClick={refresh}><RefreshCw size={15}/></button></div>}
         {loading ? <div className="loading-panel"><div className="spinner"/><span>Cargando información…</span></div> : <>
-          {active === 'dashboard' && <Dashboard models={models} apps={apps} shifts={todayShifts} todayTokens={todayTokens} pendingRepos={pendingRepos} openDebt={openDebt} production={production} assignments={assignments} goals={goals} replacements={replacements} setActive={setActive}/>}
+          {active === 'dashboard' && <Dashboard models={models} apps={apps} shifts={todayShifts} monitorShifts={monitorShifts} session={session} todayTokens={todayTokens} pendingRepos={pendingRepos} openDebt={openDebt} production={production} assignments={assignments} goals={goals} replacements={replacements} refresh={refresh} notify={notify} setActive={setActive}/>}
           {active === 'models' && <ModelsPage models={models} apps={apps} assignments={assignments} refresh={refresh} notify={notify}/>}
           {active === 'apps' && <AppsPage models={models} apps={apps} assignments={assignments} goals={goals} refresh={refresh} notify={notify}/>}
-          {active === 'shifts' && <ShiftsPage models={models} apps={apps} assignments={assignments} goals={goals} shifts={shifts} production={production} refresh={refresh} notify={notify}/>}
+          {active === 'shifts' && <ShiftsPage models={models} apps={apps} assignments={assignments} goals={goals} shifts={shifts} monitorShifts={monitorShifts} production={production} reports={reports} refresh={refresh} notify={notify}/>}
           {active === 'replacements' && <ReplacementsPage models={models} replacements={replacements} refresh={refresh} notify={notify}/>}
           {active === 'debts' && <DebtsPage models={models} debts={debts} installments={installments} payments={payments} refresh={refresh} notify={notify}/>}
           {active === 'reports' && <ReportsPage models={models} shifts={shifts} production={production} assignments={assignments} apps={apps} goals={goals} debts={debts} payments={payments} reports={reports} refresh={refresh} notify={notify}/>}
@@ -203,12 +205,88 @@ function PageHeading({ kicker, title, subtitle, action }) {
 function StatCard({ label, value, foot, icon: Icon, accent }) {
   return <div className={`stat-card ${accent || ''}`}><div className="stat-head"><span>{label}</span><span className="stat-icon"><Icon size={18}/></span></div><strong>{value}</strong><small>{foot}</small></div>;
 }
-function Dashboard({ models, apps, shifts, todayTokens, pendingRepos, openDebt, production, assignments, goals, replacements, setActive }) {
+
+function MyShiftPanel({models,apps,assignments,shifts,monitorShifts,session,refresh,notify,setActive}) {
+  const [modal,setModal]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [form,setForm]=useState({fecha:today(),jornadas_cubiertas:['tarde'],tipo_turno:'normal',hora_inicio:'14:00',hora_fin:'22:00',modelo_ids:[],apoyo_ids:[],salas:{},horas_fin:{},pendientes:'',observaciones:''});
+  const mineToday=monitorShifts.filter(s=>s.fecha===today()&&s.monitor_id===session?.user?.id).sort((a,b)=>String(b.hora_inicio||'').localeCompare(String(a.hora_inicio||'')));
+  const selectedModels=[...form.modelo_ids,...form.apoyo_ids].map(id=>models.find(m=>m.id===id)).filter(Boolean);
+  const createMyShift=async e=>{
+    e.preventDefault();
+    if(!form.jornadas_cubiertas.length){notify('Selecciona al menos un horario.');return;}
+    setSaving(true);
+    const payload={monitor_id:session.user.id,fecha:form.fecha,jornada:form.tipo_turno==='reposicion'?'reposición':form.jornadas_cubiertas.length>1?'doblando':form.jornadas_cubiertas[0],jornadas_cubiertas:form.jornadas_cubiertas,tipo_turno:form.tipo_turno,hora_inicio:form.hora_inicio||null,hora_fin:form.hora_fin||null,pendientes:safe(form.pendientes)||null,observaciones:safe(form.observaciones)||null,estado:'abierto'};
+    const {data:created,error:createError}=await supabase.from('monitor_turnos').insert(payload).select('id').single();
+    if(createError){setSaving(false);notify('No se pudo registrar tu turno: '+createError.message);return;}
+    const makeRows=(ids,es_apoyo)=>ids.map(modelo_id=>({modelo_id,monitor_turno_id:created.id,es_apoyo,sala:safe(form.salas[modelo_id])||null,fecha:form.fecha,jornada:payload.jornada,tipo_turno:form.tipo_turno,jornadas_cubiertas:form.jornadas_cubiertas,hora_inicio:form.hora_inicio||null,hora_fin:safe(form.horas_fin[modelo_id])||form.hora_fin||null,pendientes:safe(form.pendientes)||null,observaciones:safe(form.observaciones)||null,estado:'en_curso'}));
+    const rows=[...makeRows(form.modelo_ids,false),...makeRows(form.apoyo_ids,true)];
+    if(rows.length){
+      const {error:rowsError}=await supabase.from('turnos').insert(rows);
+      if(rowsError){await supabase.from('monitor_turnos').delete().eq('id',created.id);setSaving(false);notify('No se pudieron vincular las modelos: '+rowsError.message);return;}
+    }
+    setSaving(false);setModal(false);
+    setForm({fecha:today(),jornadas_cubiertas:['tarde'],tipo_turno:'normal',hora_inicio:'14:00',hora_fin:'22:00',modelo_ids:[],apoyo_ids:[],salas:{},horas_fin:{},pendientes:'',observaciones:''});
+    notify('Tu turno quedó registrado. Las jornadas de las modelos se controlan por separado.');
+    await refresh();setActive('shifts');
+  };
+  const closeMyShift=async item=>{
+    const {error}=await supabase.from('monitor_turnos').update({estado:'cerrado',closed_at:new Date().toISOString()}).eq('id',item.id);
+    if(error){notify('No se pudo cerrar tu turno: '+error.message);return;}
+    notify('Tu turno de monitor quedó cerrado. Las modelos que sigan trabajando conservan su jornada abierta.');
+    refresh();
+  };
+  const platformNames=modelId=>assignments.filter(a=>a.modelo_id===modelId&&a.activa).map(a=>apps.find(p=>p.id===a.aplicacion_id)?.nombre).filter(Boolean);
+  return <>
+    <PageHeading kicker="MI JORNADA" title="Mi turno de hoy" subtitle="Registra tu horario y consulta cuántas modelos tienes, cuáles son, en qué sala trabajan y qué aplicaciones usan." action={<button className="primary-btn" onClick={()=>setModal(true)}><Plus size={16}/> Registrar turno mío</button>}/>
+    <section className="panel my-shift-panel">
+      <div className="panel-heading"><div><h3>🌸 Mi turno · equipo de hoy</h3><p>Tu jornada y la de cada modelo pueden terminar en horarios diferentes.</p></div><span className="soft-pill">{mineToday.length} turno(s) tuyos hoy</span></div>
+      {mineToday.length? <div className="my-shift-sessions">{mineToday.map(item=>{
+        const team=shifts.filter(s=>s.monitor_turno_id===item.id);
+        const own=team.filter(s=>!s.es_apoyo),support=team.filter(s=>s.es_apoyo);
+        return <article className="my-shift-session" key={item.id}>
+          <div className="my-shift-session-head"><div><span className="eyebrow">{item.tipo_turno==='doblando'?'DOBLANDO TURNO':item.tipo_turno==='reposicion'?'REPOSICIÓN':'TURNO NORMAL'}</span><h4>{(item.jornadas_cubiertas||[item.jornada]).join(' + ').toUpperCase()}</h4><p><Clock3 size={13}/> {item.hora_inicio||'—'} a {item.hora_fin||'—'} · {dateLabel(item.fecha)}</p></div><span className={'status-pill '+(item.estado==='cerrado'?'cumplido':'en_curso')}>{item.estado==='cerrado'?'Mi turno cerrado':'Mi turno abierto'}</span></div>
+          <div className="my-shift-counts"><span><b>{own.length}</b> modelos a tu cargo</span><span><b>{support.length}</b> de apoyo / doblaje</span><span><b>{team.length}</b> en total</span></div>
+          {team.length?<div className="my-shift-roster">
+            {[{label:'Mis modelos',rows:own},{label:'Modelos de apoyo / doblaje',rows:support}].filter(group=>group.rows.length).map(group=><div className="roster-group" key={group.label}><h5>{group.label}</h5>
+              {group.rows.map(row=>{const model=models.find(m=>m.id===row.modelo_id);const names=platformNames(row.modelo_id);return <div className="roster-model" key={row.id}>
+                <div className="roster-model-name"><b>{model?.nombre||'Modelo'}</b><small>{row.sala?'Room '+row.sala:'Sala pendiente'} · {row.hora_inicio||'—'} a {row.hora_fin||'—'}</small></div>
+                <div className="roster-model-apps"><span>Aplicaciones</span><b>{names.length?names.join(' · '):'Sin aplicaciones asignadas'}</b></div>
+                <span className={'status-pill '+(row.estado==='cumplido'?'cumplido':'en_curso')}>{row.estado||'en curso'}</span>
+                <button className="text-btn" onClick={()=>setActive('shifts')}>Ver producción <ArrowUpRight size={13}/></button>
+              </div>;})}
+            </div>)}
+          </div>:<p className="empty-roster">Aún no has asociado modelos a este turno. Puedes registrar tu horario igualmente.</p>}
+          <div className="my-shift-actions"><button className="secondary-btn small-btn" onClick={()=>setActive('shifts')}>Abrir producción del equipo <ArrowUpRight size={14}/></button>{item.estado!=='cerrado'&&<button className="primary-btn small-btn" onClick={()=>closeMyShift(item)}>Finalizar mi turno de monitor</button>}</div>
+          {item.estado!=='cerrado'&&<small className="progress-caption">Al cerrar tu jornada, las modelos que sigan trabajando quedan con su turno abierto.</small>}
+        </article>;
+      })}</div>:<EmptyInline icon={CalendarClock} title="Todavía no has registrado tu turno" text="Indica tu horario, si doblas jornada y qué modelos tendrás a cargo o de apoyo." action={<button className="primary-btn small-btn" onClick={()=>setModal(true)}><Plus size={14}/> Registrar turno mío</button>}/>}
+    </section>
+    {modal&&<Modal title="Registrar mi turno" subtitle="Registra tu horario y organiza a las modelos por responsabilidad, sala y hora de salida." onClose={()=>setModal(false)}>
+      <form onSubmit={createMyShift} className="form-grid">
+        <Field label="Fecha de mi turno *"><input type="date" required value={form.fecha} onChange={e=>setForm({...form,fecha:e.target.value})}/></Field>
+        <Field label="Tipo de turno *"><select value={form.tipo_turno} onChange={e=>setForm({...form,tipo_turno:e.target.value,jornadas_cubiertas:e.target.value==='doblando'?['mañana','tarde']:form.jornadas_cubiertas})}><option value="normal">Normal</option><option value="doblando">Me toca doblar</option><option value="reposicion">Reposición</option></select></Field>
+        <Field label="Horarios que voy a cumplir *" full><div className="shift-checks">{['mañana','tarde','noche','domingo'].map(j=><label key={j}><input type="checkbox" checked={form.jornadas_cubiertas.includes(j)} onChange={e=>setForm({...form,jornadas_cubiertas:e.target.checked?[...form.jornadas_cubiertas,j]:form.jornadas_cubiertas.filter(x=>x!==j)})}/>{j==='domingo'?'🌸 Domingo':j}</label>)}</div></Field>
+        <Field label="Hora de inicio"><input type="time" value={form.hora_inicio} onChange={e=>setForm({...form,hora_inicio:e.target.value})}/></Field>
+        <Field label="Hora en que termina mi turno"><input type="time" value={form.hora_fin} onChange={e=>setForm({...form,hora_fin:e.target.value})}/></Field>
+        <Field label="Mis modelos (a mi cargo)" full><div className="shift-checks model-shift-checks">{models.filter(m=>m.estado==='activa').map(m=><label key={m.id}><input type="checkbox" checked={form.modelo_ids.includes(m.id)} onChange={e=>setForm({...form,modelo_ids:e.target.checked?[...form.modelo_ids,m.id]:form.modelo_ids.filter(id=>id!==m.id),apoyo_ids:form.apoyo_ids.filter(id=>id!==m.id)})}/>{m.nombre}{m.nickname?' (@'+m.nickname+')':''}</label>)}</div></Field>
+        <Field label="Modelos de apoyo / doblaje (no son mis modelos)" full><div className="shift-checks model-shift-checks">{models.filter(m=>m.estado==='activa'&&!form.modelo_ids.includes(m.id)).map(m=><label key={m.id}><input type="checkbox" checked={form.apoyo_ids.includes(m.id)} onChange={e=>setForm({...form,apoyo_ids:e.target.checked?[...form.apoyo_ids,m.id]:form.apoyo_ids.filter(id=>id!==m.id)})}/>{m.nombre}</label>)}</div><small className="progress-caption">Se muestran en el equipo, pero no como modelos a tu cargo.</small></Field>
+        {!!selectedModels.length&&<div className="field-full roster-room-fields"><b>Sala y salida de cada modelo</b><small>Si alguna se queda doblando después de tu hora, escribe aquí su hora final independiente.</small>{selectedModels.map(m=><div className="roster-room-edit" key={m.id}><b>{m.nombre}{form.apoyo_ids.includes(m.id)?' · Apoyo':''}</b><input aria-label={'Room de '+m.nombre} value={form.salas[m.id]||''} onChange={e=>setForm({...form,salas:{...form.salas,[m.id]:e.target.value}})} placeholder="Room / sala"/><input aria-label={'Hora de salida de '+m.nombre} type="time" value={form.horas_fin[m.id]||''} onChange={e=>setForm({...form,horas_fin:{...form.horas_fin,[m.id]:e.target.value}})}/></div>)}</div>}
+        <Field label="Pendientes para el equipo" full><textarea rows="2" value={form.pendientes} onChange={e=>setForm({...form,pendientes:e.target.value})} placeholder="Pendientes que deben quedar anotados"/></Field>
+        <Field label="Observaciones" full><textarea rows="2" value={form.observaciones} onChange={e=>setForm({...form,observaciones:e.target.value})}/></Field>
+        <div className="field-full"><FormActions onCancel={()=>setModal(false)} saving={saving} label="Guardar mi turno y equipo"/></div>
+      </form>
+    </Modal>}
+  </>;
+}
+
+function Dashboard({ models, apps, shifts, monitorShifts, session, todayTokens, pendingRepos, openDebt, production, assignments, goals, replacements, refresh, notify, setActive }) {
   const activeModels = models.filter(m => m.estado === 'activa').length;
   const todaysProduction = production.filter(p => shifts.some(s => s.id === p.turno_id));
   const topModels = models.map(m => ({ ...m, tokens: todaysProduction.filter(p => shifts.find(s => s.id === p.turno_id)?.modelo_id === m.id).reduce((x,p) => x + Number(p.tokens || 0), 0) })).sort((a,b) => b.tokens-a.tokens).slice(0,5);
   const upcoming = shifts.slice().sort((a,b) => `${a.fecha}${a.hora_inicio || ''}`.localeCompare(`${b.fecha}${b.hora_inicio || ''}`)).slice(0,5);
   return <>
+    <MyShiftPanel models={models} apps={apps} assignments={assignments} shifts={shifts} monitorShifts={monitorShifts} session={session} refresh={refresh} notify={notify} setActive={setActive}/>
     <PageHeading kicker="VISTA GENERAL" title="Hola, administradora" subtitle="Este es el estado de tu operación. Todo lo que registres aquí queda guardado en tu espacio privado." action={<button className="secondary-btn" onClick={() => setActive('shifts')}><Plus size={16}/> Registrar turno</button>}/>
     <div className="hero-strip"><div className="hero-orbit orbit-one"/><div className="hero-orbit orbit-two"/><div className="hero-copy"><div className="hero-tag"><Sparkles size={13}/> CONTROL Y SEGUIMIENTO</div><h2>Una operación clara.<br/><em>Un equipo enfocado.</em></h2><p>Organiza turnos, producción y compromisos desde un solo panel.</p></div><div className="hero-emblem"><Crown size={32}/><span>ELITE</span><small>CONTROL</small></div></div>
     <div className="stats-grid"><StatCard label="Modelos activas" value={`${activeModels} / 11`} foot="Cupos de tu equipo" icon={Users}/><StatCard label="Producción de hoy" value={number(todayTokens)} foot="Tokens registrados" icon={Activity} accent="stat-lilac"/><StatCard label="Turnos de hoy" value={shifts.length} foot="Programados o registrados" icon={CalendarDays}/><StatCard label="Reposiciones pendientes" value={pendingRepos} foot="Por coordinar" icon={Clock3} accent="stat-pink"/><StatCard label="Saldo pendiente de deudas" value={money(openDebt)} foot="Cartera por recuperar" icon={Wallet} accent="stat-warm"/></div>
@@ -240,18 +318,137 @@ function AppsPage({models,apps,assignments,goals,refresh,notify}) {
   return <><PageHeading kicker="CONFIGURACIÓN DE PRODUCCIÓN" title="Aplicaciones y metas" subtitle="Cada modelo puede tener plataformas distintas y una meta diaria propia en cada una." action={<div className="heading-actions"><button className="secondary-btn" onClick={()=>setAppModal(true)}><Plus size={15}/> Nueva aplicación</button><button className="primary-btn" onClick={()=>setAssignModal(true)} disabled={!models.length||!apps.length}><Plus size={15}/> Asignar meta</button></div>}/><div className="app-config-grid"><section className="panel"><div className="panel-heading"><div><h3>Aplicaciones disponibles</h3><p>Catálogo general de plataformas</p></div><span className="soft-pill">{apps.length} aplicaciones</span></div>{apps.length?<div className="platform-list">{apps.map(a=><div className="platform-row" key={a.id}><div className="platform-symbol"><MonitorPlay size={18}/></div><div className="platform-name"><b>{a.nombre}</b><span>{assignments.filter(x=>x.aplicacion_id===a.id&&x.activa).length} asignaciones</span></div><span className={`status-pill ${a.activa?'activa':'inactiva'}`}>{a.activa?'Activa':'Inactiva'}</span><button className="text-btn" onClick={()=>setActive(a)}>{a.activa?'Desactivar':'Activar'}</button></div>)}</div>:<EmptyInline icon={MonitorPlay} title="Sin aplicaciones registradas" text="Crea las plataformas que utiliza tu equipo." action={<button className="secondary-btn" onClick={()=>setAppModal(true)}><Plus size={15}/> Agregar aplicación</button>}/>}</section><section className="panel"><div className="panel-heading"><div><h3>Metas por modelo</h3><p>Objetivo diario vigente por plataforma</p></div><BadgeCheck size={19} className="subtle-icon"/></div>{assignments.length?<div className="goal-list">{assignments.map(a=>{const m=models.find(x=>x.id===a.modelo_id);const p=apps.find(x=>x.id===a.aplicacion_id);const g=currentGoal(a);return <div className="goal-row" key={a.id}><div><b>{m?.nombre||'Modelo'}</b><span>{p?.nombre||'Aplicación'} · {a.usuario?`@${a.usuario}`:'Sin usuario'} · {a.activa?'Asignada':'Inactiva'}</span></div><strong>{g?`${number(g.tokens_meta)} <small>tokens/${g.tipo_periodo==='quincenal'?'quincena':'día'}</small>`:'Sin meta'}</strong></div>;})}</div>:<EmptyInline icon={Gauge} title="Todavía no hay metas" text="Asigna una aplicación a una modelo y define su objetivo diario."/>}</section></div>{appModal&&<Modal title="Nueva aplicación" subtitle="Registra una plataforma en el catálogo." onClose={()=>setAppModal(false)}><form onSubmit={addApp} className="form-grid"><Field label="Nombre de la aplicación *" full><input required value={name} onChange={e=>setName(e.target.value)} placeholder="Nombre de la plataforma"/></Field><div className="field-full"><FormActions onCancel={()=>setAppModal(false)} saving={saving} label="Guardar aplicación"/></div></form></Modal>}{assignModal&&<Modal title="Asignar aplicación y meta" subtitle="La meta será independiente para esta modelo y esta plataforma." onClose={()=>setAssignModal(false)}><form onSubmit={assign} className="form-grid"><Field label="Modelos a tu cargo *" full><div className="shift-checks model-shift-checks">{models.filter(m=>m.estado==='activa').map(m=><label key={m.id}><input type="checkbox" checked={form.modelo_ids.includes(m.id)} onChange={e=>setForm({...form,modelo_ids:e.target.checked?[...form.modelo_ids,m.id]:form.modelo_ids.filter(id=>id!==m.id)})}/>{m.nombre}{m.nickname?` (@${m.nickname})`:''}</label>)}</div><small className="progress-caption">Selecciona todas las modelos que estarán contigo durante esta jornada.</small></Field><Field label="Aplicación *" full><select required value={form.aplicacion_id} onChange={e=>setForm({...form,aplicacion_id:e.target.value})}><option value="">Selecciona una aplicación</option>{apps.filter(a=>a.activa).map(a=><option key={a.id} value={a.id}>{a.nombre}</option>)}</select></Field><Field label="Usuario / nickname en esta aplicación" full><input value={form.usuario} onChange={e=>setForm({...form,usuario:e.target.value})} placeholder="Usuario de la modelo en la plataforma"/></Field><Field label="Meta de tokens *" full><input required type="number" min="1" step="1" value={form.tokens_meta} onChange={e=>setForm({...form,tokens_meta:e.target.value})} placeholder="Ej. 1200"/></Field><Field label="Periodo de la meta"><select value={form.tipo_periodo} onChange={e=>setForm({...form,tipo_periodo:e.target.value})}><option value="quincenal">Quincenal</option><option value="diaria">Diaria</option></select></Field><Field label="Vigente desde *" full><input required type="date" value={form.fecha_inicio} onChange={e=>setForm({...form,fecha_inicio:e.target.value})}/></Field><div className="field-full"><FormActions onCancel={()=>setAssignModal(false)} saving={saving} label="Guardar asignación"/></div></form></Modal>}</>;
 }
 
-function ShiftsPage({models,apps,assignments,goals,shifts,production,refresh,notify}) {
-  const [modal,setModal]=useState(false); const [selected,setSelected]=useState(''); const [form,setForm]=useState({modelo_ids:[],apoyo_ids:[],fecha:today(),jornada:'tarde',tipo_turno:'normal',jornadas_cubiertas:['tarde'],hora_inicio:'14:00',hora_fin:'22:00',pendientes:'',observaciones:''}); const [tokens,setTokens]=useState({}); const [notes,setNotes]=useState({}); const [saving,setSaving]=useState(false);
-  const activeAssignments=assignments.filter(a=>a.modelo_id===shifts.find(s=>s.id===selected)?.modelo_id&&a.activa);
-  const create=async e=>{e.preventDefault();if(!form.jornadas_cubiertas.length){notify('Selecciona al menos un horario.');return;}if(!form.modelo_ids.length&&!form.apoyo_ids.length){notify('Selecciona al menos una modelo para registrar el turno.');return;}setSaving(true);const makeRows=(ids,es_apoyo)=>ids.map(modelo_id=>({modelo_id,es_apoyo,fecha:form.fecha,jornada:form.tipo_turno==='reposicion'?'reposición':form.jornadas_cubiertas.length>1?'doblando':form.jornadas_cubiertas[0],tipo_turno:form.tipo_turno,jornadas_cubiertas:form.jornadas_cubiertas,hora_inicio:form.hora_inicio,hora_fin:form.hora_fin,pendientes:safe(form.pendientes)||null,observaciones:safe(form.observaciones)||null,estado:'programado'}));const rows=[...makeRows(form.modelo_ids,false),...makeRows(form.apoyo_ids,true)];const {error}=await supabase.from('turnos').insert(rows);setSaving(false);if(error){notify(`No se pudo crear tu turno: ${error.message}`);return;}setModal(false);notify(`Tu turno quedó creado con ${rows.length} modelos a cargo`);refresh();};
-  const saveProduction=async e=>{e.preventDefault();const shift=shifts.find(s=>s.id===selected);if(!shift)return;setSaving(true);const rows=activeAssignments.filter(a=>tokens[a.id]!==undefined&&tokens[a.id]!=='').map(a=>({turno_id:selected,modelo_aplicacion_id:a.id,tokens:Math.max(0,Math.floor(Number(tokens[a.id])||0)),observaciones:safe(notes[a.id])||null}));if(!rows.length){setSaving(false);notify('Ingresa tokens en al menos una aplicación.');return;}const {error}=await supabase.from('produccion').upsert(rows,{onConflict:'turno_id,modelo_aplicacion_id'});setSaving(false);if(error){notify(`No se pudo guardar producción: ${error.message}`);return;}notify('Producción guardada');refresh();};
-  const chosen=shifts.find(s=>s.id===selected);const shiftProduction=production.filter(p=>p.turno_id===selected);
-  const goalFor=(assignment)=>goals.filter(g=>g.modelo_aplicacion_id===assignment.id&&g.fecha_inicio<= (chosen?.fecha||today())&&(!g.fecha_fin||g.fecha_fin>=(chosen?.fecha||today()))).sort((a,b)=>b.fecha_inicio.localeCompare(a.fecha_inicio))[0];
-  const changeState=async (shift,state)=>{const {error}=await supabase.from('turnos').update({estado:state}).eq('id',shift.id);if(error)notify(error.message);else{notify('Estado del turno actualizado');refresh();}};
-  const todays=shifts.slice().sort((a,b)=>b.fecha.localeCompare(a.fecha));
-  return <><PageHeading kicker="OPERACIÓN DIARIA" title="Turnos y producción" subtitle="Programa jornadas y registra los tokens por aplicación. Puedes actualizar los datos del turno mientras esté abierto." action={<button className="primary-btn" onClick={()=>setModal(true)} disabled={!models.some(m=>m.estado==='activa')}><Plus size={16}/> Programar turno</button>}/><div className="shift-layout"><section className="panel"><div className="panel-heading"><div><h3>Turnos registrados</h3><p>Selecciona un turno para cargar su producción</p></div><span className="soft-pill">{shifts.length} en total</span></div>{todays.length?<div className="shift-list">{todays.map(s=><button className={`shift-card ${selected===s.id?'selected':''}`} key={s.id} onClick={()=>{setSelected(s.id);const saved=production.filter(p=>p.turno_id===s.id);setTokens(Object.fromEntries(saved.map(p=>[p.modelo_aplicacion_id,String(p.tokens)])));setNotes(Object.fromEntries(saved.map(p=>[p.modelo_aplicacion_id,p.observaciones||''])));}}><span className="shift-date"><b>{new Date(`${s.fecha}T12:00:00`).getDate()}</b><small>{new Date(`${s.fecha}T12:00:00`).toLocaleDateString('es-CO',{month:'short'})}</small></span><span className="shift-info"><b>{models.find(m=>m.id===s.modelo_id)?.nombre||'Modelo'}</b><small>{s.tipo_turno==='doblando'?`Dobló: ${(s.jornadas_cubiertas||[]).join(' + ')}`:s.tipo_turno==='reposicion'?'Reposición':s.jornada} · {s.hora_inicio||'—'} a {s.hora_fin||'—'}</small></span><span className={`status-pill ${s.estado}`}>{s.estado}</span></button>)}</div>:<EmptyInline icon={CalendarDays} title="No hay turnos registrados" text="Programa el primer turno para empezar a llevar el control."/>}</section><section className="panel production-panel"><div className="panel-heading"><div><h3>Registro de producción</h3><p>{chosen?`${models.find(m=>m.id===chosen.modelo_id)?.nombre} · ${dateLabel(chosen.fecha)}`:'Selecciona un turno'}</p></div><Activity size={19} className="subtle-icon"/></div>{chosen?<><div className="shift-detail"><span className="soft-pill">{chosen.jornada}</span><span><Clock3 size={14}/> {chosen.hora_inicio||'—'} – {chosen.hora_fin||'—'}</span><select value={chosen.estado} onChange={e=>changeState(chosen,e.target.value)}><option value="programado">Programado</option><option value="cumplido">Cumplido</option><option value="ausencia">Ausencia</option><option value="cancelado">Cancelado</option></select></div><div className="panel-heading" style={{marginTop:18}}><div><h3>🌸 Mi turno · resumen del equipo</h3><p>Modelos a cargo y tokens acumulados en esta jornada</p></div></div><div className="shift-team-summary">{shifts.filter(s=>s.fecha===chosen.fecha&&s.hora_inicio===chosen.hora_inicio&&s.hora_fin===chosen.hora_fin&&(s.jornadas_cubiertas||[s.jornada]).join(",")===(chosen.jornadas_cubiertas||[chosen.jornada]).join(",")).map(s=>{const model=models.find(m=>m.id===s.modelo_id);const total=production.filter(p=>p.turno_id===s.id).reduce((sum,p)=>sum+Number(p.tokens||0),0);return <div className="shift-team-row" key={s.id}><span><b>{model?.nombre||"Modelo"}</b><small>{s.es_apoyo?"Apoyo / doblaje · No está a tu cargo":"A tu cargo"}</small></span><strong>{number(total)} tokens</strong></div>;})}<div className="shift-team-total"><span>Total del equipo</span><b>{number(shifts.filter(s=>s.fecha===chosen.fecha&&s.hora_inicio===chosen.hora_inicio&&s.hora_fin===chosen.hora_fin&&(s.jornadas_cubiertas||[s.jornada]).join(",")===(chosen.jornadas_cubiertas||[chosen.jornada]).join(",")).reduce((sum,s)=>sum+production.filter(p=>p.turno_id===s.id).reduce((v,p)=>v+Number(p.tokens||0),0),0))} tokens</b></div></div><form onSubmit={saveProduction}><div className="production-entry-list">{activeAssignments.length?activeAssignments.map(a=>{const p=apps.find(x=>x.id===a.aplicacion_id);const g=goalFor(a);const existing=shiftProduction.find(x=>x.modelo_aplicacion_id===a.id);const current=tokens[a.id]!==undefined?tokens[a.id]:existing?String(existing.tokens):'';const periodTotal=g?.tipo_periodo==='quincenal'?production.filter(row=>row.modelo_aplicacion_id===a.id&&shifts.some(sh=>sh.id===row.turno_id&&sh.fecha>=g.fecha_inicio&&sh.fecha<=(chosen?.fecha||today()))).reduce((sum,row)=>sum+Number(row.tokens||0),0):Number(current||0);const pct=g&&g.tokens_meta?Math.min(100,periodTotal/Number(g.tokens_meta)*100):0;const remaining=g?Math.max(0,Number(g.tokens_meta)-periodTotal):0;return <div className="production-entry" key={a.id}><div className="production-entry-head"><b>{p?.nombre||'Aplicación'}</b><span>{g?`Meta ${number(g.tokens_meta)}`:'Meta no configurada'}</span></div><input type="number" min="0" step="1" value={current} onChange={e=>setTokens({...tokens,[a.id]:e.target.value})} placeholder="Tokens registrados"/><input className="production-note" value={notes[a.id]||''} onChange={e=>setNotes({...notes,[a.id]:e.target.value})} placeholder="Observación opcional"/><div className="goal-progress"><i style={{width:`${pct}%`}}/></div><small className="progress-caption">{current?`${number(current)} tokens en este turno · ${g?.tipo_periodo==='quincenal'?`${number(periodTotal)} acumulados, faltan ${number(remaining)}`:`${Math.round(pct)}% de la meta`}`:'Escribe la producción de esta aplicación'}</small></div>;}):<EmptyInline icon={MonitorPlay} title="Esta modelo no tiene aplicaciones asignadas" text="Primero configura sus plataformas y metas en Aplicaciones y metas."/>}</div>{activeAssignments.length>0&&<div className="form-actions"><button className="primary-btn" disabled={saving}>{saving?'Guardando…':'Guardar producción'}<Check size={16}/></button></div>}</form></>:<EmptyInline icon={Activity} title="Elige un turno" text="Al seleccionar una jornada verás sus aplicaciones y podrás registrar los tokens."/>}</section></div>{modal&&<Modal title="Programar nuevo turno" subtitle="El turno se relaciona con una modelo y una fecha." onClose={()=>setModal(false)}><form onSubmit={create} className="form-grid"><Field label="Modelo *" full><select required value={form.modelo_id} onChange={e=>setForm({...form,modelo_id:e.target.value})}><option value="">Selecciona una modelo</option>{models.filter(m=>m.estado==='activa').map(m=><option key={m.id} value={m.id}>{m.nombre}</option>)}</select></Field><Field label="Modelos de apoyo / doblaje (no son de tu turno)" full><div className="shift-checks model-shift-checks">{models.filter(m=>m.estado==='activa'&&!form.modelo_ids.includes(m.id)).map(m=><label key={m.id}><input type="checkbox" checked={form.apoyo_ids.includes(m.id)} onChange={e=>setForm({...form,apoyo_ids:e.target.checked?[...form.apoyo_ids,m.id]:form.apoyo_ids.filter(id=>id!==m.id)})}/>{m.nombre}</label>)}</div><small className="progress-caption">Se registran como apoyo, separadas de tus modelos a cargo.</small></Field><Field label="Fecha *"><input required type="date" value={form.fecha} onChange={e=>setForm({...form,fecha:e.target.value})}/></Field><Field label="Tipo de turno *"><select value={form.tipo_turno} onChange={e=>setForm({...form,tipo_turno:e.target.value,jornadas_cubiertas:e.target.value==='doblando'?['mañana','tarde']:form.jornadas_cubiertas})}><option value="normal">Turno normal</option><option value="doblando">Doblando turno</option><option value="reposicion">Reposición de turno</option></select></Field><Field label="Horarios que cubriste *" full><p className="field-hint">Marca todos los horarios que trabajaste. Tarde viene seleccionada por defecto; puedes sumar otros y domingo.</p><div className="shift-checks">{['mañana','tarde','noche','domingo'].map(j=><label key={j}><input type="checkbox" checked={form.jornadas_cubiertas.includes(j)} onChange={e=>setForm({...form,jornadas_cubiertas:e.target.checked?[...form.jornadas_cubiertas,j]:form.jornadas_cubiertas.filter(x=>x!==j)})}/>{j==='domingo'?'🌸 Domingo':j}</label>)}</div></Field><Field label="Hora de inicio"><input type="time" value={form.hora_inicio} onChange={e=>setForm({...form,hora_inicio:e.target.value})}/></Field><Field label="Hora de finalización"><input type="time" value={form.hora_fin} onChange={e=>setForm({...form,hora_fin:e.target.value})}/></Field><Field label="Pendientes de la modelo" full><textarea rows="3" value={form.pendientes} onChange={e=>setForm({...form,pendientes:e.target.value})} placeholder="Pendientes, compromisos o tareas para este turno"/></Field><Field label="Observaciones adicionales" full><textarea rows="2" value={form.observaciones} onChange={e=>setForm({...form,observaciones:e.target.value})}/></Field><div className="field-full"><FormActions onCancel={()=>setModal(false)} saving={saving} label="Crear turno"/></div></form></Modal>}</>;
-}
 
+function ShiftsPage({models,apps,assignments,goals,shifts,monitorShifts,production,reports,refresh,notify}) {
+  const [selected,setSelected]=useState('');
+  const [tokens,setTokens]=useState({});
+  const [notes,setNotes]=useState({});
+  const [saving,setSaving]=useState(false);
+  const chosen=shifts.find(s=>s.id===selected);
+  const activeAssignments=assignments.filter(a=>a.modelo_id===chosen?.modelo_id&&a.activa);
+  const shiftProduction=production.filter(p=>p.turno_id===selected);
+  const goalFor=assignment=>goals.filter(g=>g.modelo_aplicacion_id===assignment.id&&g.fecha_inicio<=(chosen?.fecha||today())&&(!g.fecha_fin||g.fecha_fin>=(chosen?.fecha||today()))).sort((a,b)=>b.fecha_inicio.localeCompare(a.fecha_inicio))[0];
+  const persistProduction=async()=>{
+    if(!chosen)return false;
+    const rows=activeAssignments.filter(a=>tokens[a.id]!==undefined&&tokens[a.id]!=='').map(a=>({turno_id:chosen.id,modelo_aplicacion_id:a.id,tokens:Math.max(0,Math.floor(Number(tokens[a.id])||0)),observaciones:safe(notes[a.id])||null}));
+    if(!rows.length)return true;
+    const {error}=await supabase.from('produccion').upsert(rows,{onConflict:'turno_id,modelo_aplicacion_id'});
+    if(error){notify('No se pudo guardar la producción: '+error.message);return false;}
+    return true;
+  };
+  const saveProduction=async e=>{e.preventDefault();setSaving(true);const ok=await persistProduction();setSaving(false);if(ok){notify('Producción guardada');refresh();}};
+  const changeState=async(shift,state)=>{const {error}=await supabase.from('turnos').update({estado:state}).eq('id',shift.id);if(error)notify(error.message);else{notify('Jornada individual actualizada');refresh();}};
+  const buildPayload=shift=>{
+    const model=models.find(m=>m.id===shift.modelo_id);
+    const lines=assignments.filter(a=>a.modelo_id===model?.id&&a.activa).map(a=>{
+      const platform=apps.find(x=>x.id===a.aplicacion_id);
+      const saved=production.find(x=>x.turno_id===shift.id&&x.modelo_aplicacion_id===a.id);
+      const unsaved=shift.id===selected?tokens[a.id]:undefined;
+      const value=unsaved!==undefined&&unsaved!==''?Number(unsaved):Number(saved?.tokens||0);
+      const goal=goals.filter(x=>x.modelo_aplicacion_id===a.id&&x.fecha_inicio<=shift.fecha&&(!x.fecha_fin||x.fecha_fin>=shift.fecha)).sort((x,y)=>y.fecha_inicio.localeCompare(x.fecha_inicio))[0];
+      return {aplicacion:platform?.nombre||'Aplicación',usuario:a.usuario||'',tokens:value,meta:Number(goal?.tokens_meta||0),porcentaje:goal?.tokens_meta?Math.round(value/Number(goal.tokens_meta)*100):null};
+    });
+    const total=lines.reduce((sum,line)=>sum+line.tokens,0);
+    const monitorShift=monitorShifts.find(s=>s.id===shift.monitor_turno_id);
+    return {modelo:model?.nombre||'Modelo',nickname:model?.nickname||'',fecha:shift.fecha,jornada:shift.jornada,hora_inicio:shift.hora_inicio,hora_fin:shift.hora_fin,sala:shift.sala||'',tipo_turno:shift.tipo_turno||'normal',es_apoyo:!!shift.es_apoyo,monitor_jornada:monitorShift?.jornada||'',monitor_hora_inicio:monitorShift?.hora_inicio||'',monitor_hora_fin:monitorShift?.hora_fin||'',jornadas_cubiertas:shift.jornadas_cubiertas||[],pendientes:shift.pendientes||'',aplicaciones:lines,total_tokens:total};
+  };
+  const closeModelShift=async()=>{
+    if(!chosen)return;
+    setSaving(true);
+    const ok=await persistProduction();
+    if(!ok){setSaving(false);return;}
+    const payload=buildPayload(chosen);
+    const existing=reports.find(r=>r.turno_id===chosen.id);
+    let reportError=null;
+    if(existing){
+      if(existing.estado!=='enviado'){
+        const result=await supabase.from('reportes').update({contenido:payload,estado:'generado'}).eq('id',existing.id);
+        reportError=result.error;
+      }
+    }else{
+      const result=await supabase.from('reportes').insert({modelo_id:chosen.modelo_id,turno_id:chosen.id,fecha_reporte:chosen.fecha,contenido:payload,estado:'generado'});
+      reportError=result.error;
+    }
+    if(reportError){setSaving(false);notify('No se pudo preparar el informe: '+reportError.message);return;}
+    const {error}=await supabase.from('turnos').update({estado:'cumplido'}).eq('id',chosen.id);
+    setSaving(false);
+    if(error){notify('El informe quedó guardado, pero no se pudo cerrar la jornada: '+error.message);refresh();return;}
+    notify('Jornada de la modelo cerrada. Su informe quedó guardado para enviarlo ahora o después.');
+    refresh();
+  };
+  const selectShift=s=>{
+    setSelected(s.id);
+    const saved=production.filter(p=>p.turno_id===s.id);
+    setTokens(Object.fromEntries(saved.map(p=>[p.modelo_aplicacion_id,String(p.tokens)])));
+    setNotes(Object.fromEntries(saved.map(p=>[p.modelo_aplicacion_id,p.observaciones||''])));
+  };
+  const teamShifts=chosen?(chosen.monitor_turno_id?shifts.filter(s=>s.monitor_turno_id===chosen.monitor_turno_id):shifts.filter(s=>s.fecha===chosen.fecha&&s.hora_inicio===chosen.hora_inicio&&s.hora_fin===chosen.hora_fin&&(s.jornadas_cubiertas||[s.jornada]).join(',')===(chosen.jornadas_cubiertas||[chosen.jornada]).join(','))):[];
+  const reportForChosen=reports.find(r=>r.turno_id===chosen?.id);
+  const teamTokens=teamShifts.reduce((sum,s)=>sum+production.filter(p=>p.turno_id===s.id).reduce((v,p)=>v+Number(p.tokens||0),0),0);
+  const sorted=shifts.slice().sort((a,b)=>b.fecha.localeCompare(a.fecha)||String(b.hora_inicio||'').localeCompare(String(a.hora_inicio||'')));
+  return <>
+    <PageHeading kicker="OPERACIÓN DIARIA" title="Turnos y producción" subtitle="Cada modelo tiene su propia hora de entrada y salida. Tu turno de monitor se puede cerrar sin finalizar las jornadas de ellas."/>
+    <div className="shift-layout">
+      <section className="panel">
+        <div className="panel-heading"><div><h3>Jornadas individuales</h3><p>Elige una modelo para registrar o cerrar su producción.</p></div><span className="soft-pill">{shifts.length} registros</span></div>
+        {sorted.length?<div className="shift-list">{sorted.map(s=>{
+          const model=models.find(m=>m.id===s.modelo_id);
+          const report=reports.find(r=>r.turno_id===s.id);
+          return <div className={'shift-card shift-card-row '+(selected===s.id?'selected':'')} key={s.id}>
+            <button className="shift-card-select" onClick={()=>selectShift(s)}>
+              <span className="shift-date"><b>{new Date(s.fecha+'T12:00:00').getDate()}</b><small>{new Date(s.fecha+'T12:00:00').toLocaleDateString('es-CO',{month:'short'})}</small></span>
+              <span className="shift-info"><b>{model?.nombre||'Modelo'}{s.es_apoyo?' · Apoyo':''}</b><small>{s.jornada} · {s.hora_inicio||'—'} a {s.hora_fin||'—'} · {s.sala?'Room '+s.sala:'Sin sala'}</small></span>
+            </button>
+            <div className="shift-card-actions"><span className={'status-pill '+(s.estado==='cumplido'?'cumplido':s.estado==='en_curso'?'en_curso':s.estado)}>{s.estado||'programado'}</span>{report&&<span className="report-ready-dot" title="Informe guardado"><FileText size={14}/></span>}</div>
+          </div>;
+        })}</div>:<EmptyInline icon={CalendarDays} title="No hay jornadas registradas" text="Registra tu turno desde el panel principal para organizar las modelos por grupo, sala y horario."/>}
+      </section>
+      <section className="panel production-panel">
+        <div className="panel-heading"><div><h3>Registro de producción</h3><p>{chosen?(models.find(m=>m.id===chosen.modelo_id)?.nombre||'Modelo')+' · '+dateLabel(chosen.fecha):'Selecciona una jornada individual'}</p></div><Activity size={19} className="subtle-icon"/></div>
+        {chosen?<>
+          <div className="shift-detail"><span className="soft-pill">{chosen.jornada}</span><span><Clock3 size={14}/> {chosen.hora_inicio||'—'} – {chosen.hora_fin||'—'}</span><span className="soft-pill">{chosen.sala?'Room '+chosen.sala:'Sala pendiente'}</span>
+            <select value={chosen.estado} onChange={e=>changeState(chosen,e.target.value)}><option value="programado">Programado</option><option value="en_curso">En curso</option><option value="cumplido">Cumplido</option><option value="ausencia">Ausencia</option><option value="cancelado">Cancelado</option></select>
+          </div>
+          <div className="panel-heading" style={{marginTop:18}}><div><h3>🌸 Resumen de esta jornada</h3><p>{teamShifts.filter(s=>!s.es_apoyo).length} modelos a cargo · {teamShifts.filter(s=>s.es_apoyo).length} de apoyo / doblaje</p></div></div>
+          <div className="shift-team-summary">
+            {teamShifts.map(s=>{
+              const model=models.find(m=>m.id===s.modelo_id);
+              const total=production.filter(p=>p.turno_id===s.id).reduce((sum,p)=>sum+Number(p.tokens||0),0);
+              const names=assignments.filter(a=>a.modelo_id===s.modelo_id&&a.activa).map(a=>apps.find(p=>p.id===a.aplicacion_id)?.nombre).filter(Boolean);
+              return <div className="shift-team-row" key={s.id}><span><b>{model?.nombre||'Modelo'}</b><small>{s.es_apoyo?'Apoyo / doblaje · No está a tu cargo':'A tu cargo'} · {s.sala?'Room '+s.sala:'Sala pendiente'} · {names.join(', ')||'Sin aplicaciones'}</small></span><strong>{number(total)} tokens</strong></div>;
+            })}
+            <div className="shift-team-total"><span>Total registrado del grupo</span><b>{number(teamTokens)} tokens</b></div>
+          </div>
+          <form onSubmit={saveProduction}>
+            <div className="production-entry-list">
+              {activeAssignments.length?activeAssignments.map(a=>{
+                const platform=apps.find(x=>x.id===a.aplicacion_id);
+                const goal=goalFor(a);
+                const existing=shiftProduction.find(x=>x.modelo_aplicacion_id===a.id);
+                const current=tokens[a.id]!==undefined?tokens[a.id]:existing?String(existing.tokens):'';
+                const periodTotal=goal?.tipo_periodo==='quincenal'?production.filter(row=>row.modelo_aplicacion_id===a.id&&shifts.some(sh=>sh.id===row.turno_id&&sh.fecha>=goal.fecha_inicio&&sh.fecha<=(chosen?.fecha||today()))).reduce((sum,row)=>sum+Number(row.tokens||0),0):Number(current||0);
+                const pct=goal&&goal.tokens_meta?Math.min(100,periodTotal/Number(goal.tokens_meta)*100):0;
+                const remaining=goal?Math.max(0,Number(goal.tokens_meta)-periodTotal):0;
+                return <div className="production-entry" key={a.id}>
+                  <div className="production-entry-head"><b>{platform?.nombre||'Aplicación'}</b><span>{goal?'Meta '+number(goal.tokens_meta):'Meta no configurada'}</span></div>
+                  {a.usuario&&<small className="progress-caption">Usuario: @{a.usuario}</small>}
+                  <input type="number" min="0" step="1" value={current} onChange={e=>setTokens({...tokens,[a.id]:e.target.value})} placeholder="Tokens registrados"/>
+                  <input className="production-note" value={notes[a.id]||''} onChange={e=>setNotes({...notes,[a.id]:e.target.value})} placeholder="Observación opcional"/>
+                  <div className="goal-progress"><i style={{width:String(pct)+'%'}}/></div>
+                  <small className="progress-caption">{current?number(current)+' tokens en esta jornada · '+(goal?.tipo_periodo==='quincenal'?number(periodTotal)+' acumulados, faltan '+number(remaining):Math.round(pct)+'% de la meta'):'Escribe la producción de esta aplicación'}</small>
+                </div>;
+              }):<EmptyInline icon={MonitorPlay} title="Esta modelo no tiene aplicaciones asignadas" text="Primero configura sus plataformas y metas en Aplicaciones y metas."/>}
+            </div>
+            {activeAssignments.length>0&&<div className="form-actions"><button className="primary-btn" disabled={saving}>{saving?'Guardando…':'Guardar producción'}<Check size={16}/></button></div>}
+          </form>
+          <div className="individual-close-box">
+            {reportForChosen?<><b><FileText size={15}/> Informe de esta modelo: {reportForChosen.estado==='enviado'?'ya enviado':'guardado y pendiente de enviar'}</b><p>El informe queda disponible en Reportes para compartirlo cuando ella lo necesite.</p></>:<><b>¿Ella ya terminó su jornada?</b><p>Esto cierra solamente el turno de esta modelo, prepara su informe individual y deja tu turno de monitor intacto.</p><button className="primary-btn" disabled={saving} onClick={closeModelShift}>{saving?'Preparando informe…':'Finalizar jornada y preparar informe'}<FileText size={15}/></button></>}
+          </div>
+        </>:<EmptyInline icon={Activity} title="Elige una jornada" text="Al seleccionar una modelo verás sus aplicaciones, podrás registrar tokens y finalizar su turno sin cerrar el tuyo."/>}
+      </section>
+    </div>
+  </>;
+}
 function ReplacementsPage({models,replacements,refresh,notify}) {
  const [modal,setModal]=useState(false);const [form,setForm]=useState({modelo_id:'',horas:'',fecha_limite:'',motivo:''});const [saving,setSaving]=useState(false);
  const create=async e=>{e.preventDefault();setSaving(true);const {error}=await supabase.from('reposiciones').insert({...form,horas:Number(form.horas),fecha_limite:form.fecha_limite||null,motivo:safe(form.motivo)||null,estado:'pendiente'});setSaving(false);if(error){notify(error.message);return;}setModal(false);notify('Reposición registrada');refresh();};
