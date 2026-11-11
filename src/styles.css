@@ -5,3 +5,21 @@
 @media(max-width:680px){.topbar{height:65px;padding:0 15px}.page-wrap{padding:25px 15px 16px}.page-heading{align-items:flex-start;flex-direction:column;margin-bottom:20px}.page-heading h1{font-size:27px}.page-heading>button,.page-heading>.heading-actions{width:100%}.heading-actions .primary-btn,.heading-actions .secondary-btn{flex:1;padding:10px 8px}.hero-strip{min-height:180px;padding:21px}.hero-copy h2{font-size:24px}.hero-copy p{max-width:230px;line-height:1.5}.hero-emblem{width:76px;height:76px;margin-right:8px;flex-shrink:0}.hero-emblem svg{width:22px}.hero-emblem span{font-size:11px}.hero-emblem small{font-size:6px}.hero-orbit{right:-110px}.orbit-two{right:-170px}.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.stat-card{padding:12px}.stat-card strong{font-size:18px}.stat-head{font-size:8px}.compact-stats{grid-template-columns:1fr 1fr}.compact-stats .stat-card:last-child{grid-column:1/-1}.dashboard-grid{gap:11px}.panel{padding:15px}.quick-grid{grid-template-columns:1fr 1fr}.quick-action{padding:10px;gap:8px}.quick-icon{width:31px;height:31px}.page-footer{font-size:7px}.page-footer span:last-child{display:none}.table-toolbar{align-items:flex-start;flex-direction:column}.searchbox{width:100%}.inline-metrics{flex-wrap:wrap}.form-grid{grid-template-columns:1fr}.field-full{grid-column:auto}.debt-list{grid-template-columns:1fr}.report-generator{padding:15px;gap:10px}.report-step-icon{width:36px;height:36px}.report-form{grid-template-columns:1fr}.report-form .primary-btn{width:100%}.report-row{flex-wrap:wrap}.report-meta{min-width:calc(100% - 70px)}.report-row .status-pill{margin-left:45px}.report-row .whatsapp-btn{margin-left:auto}.filter-select{width:100%}.shift-detail{flex-wrap:wrap}.shift-detail>span:nth-child(2){flex:initial}.shift-detail select{margin-left:auto}.auth-card{padding:29px 22px 23px}.auth-card h1{font-size:27px}.toast{left:15px;right:15px;bottom:15px;justify-content:center}}
 
 .production-note{margin:-2px 0 9px!important;background:#fff!important;font-size:9px!important;padding:8px 10px!important}
+
+
+/* ELITE TARDE VENECIA — identidad rosa, negro y brillo */
+:root{--rose-50:#fff5fa;--rose-100:#fde8f1;--rose-200:#f7c9dc;--rose-300:#eea5c4;--rose-500:#cf5d91;--rose-700:#8d2855}
+body{background:#fbf6fa}
+.primary-btn{background:linear-gradient(135deg,#a52d66,#d45d91)!important;box-shadow:0 7px 18px rgba(174,54,108,.18)}
+.primary-btn:hover{background:linear-gradient(135deg,#84204f,#bd477e)!important}
+.brand-mark,.stat-icon,.quick-icon,.activity-icon,.platform-symbol,.report-step-icon{background:linear-gradient(145deg,#fff0f7,#f6d8e7);color:#a63f70}
+.nav-item.active{background:linear-gradient(90deg,#fae7f0,#fff5fa);color:#a12e65;border-left-color:#d85f95}
+.hero-strip{background:linear-gradient(112deg,#160f19 0%,#3a1b34 52%,#8b315e 100%)}
+.hero-copy h2 em{color:#f2a8ca}
+.hero-tag{color:#ffd5e7}
+.stat-pink .stat-icon{background:#fde8f1;color:#bd4c83}
+.goal-progress i,.rank-track i{background:linear-gradient(90deg,#c64c88,#f2a7c9)}
+.shift-checks{display:flex;gap:9px;flex-wrap:wrap}
+.shift-checks label{display:flex;align-items:center;gap:7px;padding:9px 12px;border:1px solid #f1d5e2;border-radius:10px;background:#fff7fb;color:#7d4964;font-size:10px;text-transform:capitalize}
+.shift-checks input{width:auto;accent-color:#c94f88}
+@media(max-width:680px){.shift-checks label{flex:1;justify-content:center}}
